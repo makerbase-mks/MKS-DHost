@@ -3,6 +3,7 @@
 #include <vector>
 #include <list>
 #include <map>
+#include <algorithm>
 #include <queue>
 #include <QDebug>
 #include <QFuture>
@@ -45,6 +46,7 @@ struct segment
     QVector2D p1;
     QVector2D p2;
     QVector2D normal;
+    QVector3D trinormal;
     int backid;
     int frontid;
     int nowid;
@@ -69,6 +71,7 @@ struct loop{
 struct whitedata{
     QVector2D sp;
     QVector2D ep;
+    int gray;
 };
 
 struct layerresult{
@@ -91,6 +94,11 @@ static bool layerresultcompare(const layerresult &a, const layerresult &b){
 static bool loopcompare(const loop &a, const loop &b)
 {
     return a.maxsize.x()*a.maxsize.y() > b.maxsize.x()*b.maxsize.y() && a.minsize.x()*a.minsize.y() < b.minsize.y()*b.minsize.x();
+}
+
+static bool colorcompare(const loop &a, const loop &b)
+{
+    return a.fillcolor.red() == 255;
 }
 
 static bool bs(const segment &a, const segment &b)
@@ -121,26 +129,50 @@ public:
     QImage zippreview;
     void addLayer(unsigned int id, std::vector<triangle> tl, double att);
     void addH(unsigned int id, double att);
+    void removeH();
     void loadMdlp(QString filename, bool &canread);
-    void loadZip(QString path,bool &slicecomplete, int &precent);
+    void loadMdlpOld(QString filename, bool &canread);
+    void newloadMdlp(QString filename, bool &canread);
+    void loadZip(QString path,bool &slicecomplete, int &precent,bool &error);
     void loadCWS(QString path, bool &slicecomplete, int &precent);
-    void initZip(QString path);
-    void initCWS(QString path);
+    void initZip(QString path,bool &error);
+    void initCWS(QString path,bool &error);
     void setMaxSize(int max_size);
     void startslice(bool &slicecomplete, int &precent, bool fastmod);
+    void startsliceSave(bool &slicecomplete, int &precent, bool newSliceType);
     void checkslice(bool &slicecomplete, int &precent);
     void generateLoop(unsigned int id, std::vector<triangle> tl, double att);
     void generateData(unsigned int id, std::vector<loop> nlooplist, QImage &floorimg);
     void generateByH(unsigned int id, double att, QImage &floorimg);
     void generateByPreSlice(unsigned int id, double att, QImage &floorimg);
+    void generateByPreSliceCopy(unsigned int id, double att, QImage &floorimg);
+    void newGenerateByPreSlice(unsigned int id, double att, QImage &floorimg);
+    void newGenerateByPreSlicecopy(unsigned int id, double att, QImage &floorimg);
     void generateByImage(unsigned int id, QImage &floorimg);
     void setResolution(QVector2D rs);
     void setPlatform(QVector2D pf);
-    void setFilename(QString filename);
+    void setFilename(QString filename,int &precent, bool &finish);
+    void setFilenameSave(QString filename);
     void setZipFilename(QString filename, QString zipfilename);
     void setSliceType(int slicetype);
     void checkAllThread(bool &isfinish);
     unsigned int slicepos;
+    double functionFromBook(double x, double y);
+    double startAntialiasingMethod1(int numPixels, double x, double y, double dx, double dy);
+    QImage calculatePixels(double minX, double maxX, double minY, double maxY,QImage img, bool antialiasingEnabled);
+//    void testimage(QImage &img);
+    double mapNumbers(double x, int type);
+    bool canstop;
+    int count;
+    void clearFiles(QDir pathdir);
+    void setSaveFileName(QString name);
+    QString saveFileName;//slice and save file name
+    bool iswriting;
+    void writeFile();
+    void writeFilecopy();
+    int nowLayerid;
+    void initSliceThreadCount(int count);
+    QImage baseimg;
 private:
     std::vector< QFuture<void> > slicethreads;
     QFuture<void> checkthreads;
@@ -176,7 +208,8 @@ private:
     bool IntersectsXYPlane();
     bool ParallelXYPlane();
     void initSliceThread();
+
     void getSegmentAroundX(std::vector<segment> normallist, std::vector<sid> &outlist, double x);
-    double distance2D(QVector2D point1, QVector2D point2);
+    double distance2D(QVector2D point1, QVector2D point2);    
 };
 #endif // SLICE_H

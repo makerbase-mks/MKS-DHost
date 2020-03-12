@@ -40,7 +40,7 @@ void NumberEdit::paintEvent(QPaintEvent *event)
     mp->drawImage(rw, downrh, down);
     downrect = QRect(rw, downrh, down.width(), down.height());
     mp->end();
-    interv = 1;
+    interv = 5;
 }
 
 void NumberEdit::mousePressEvent(QMouseEvent *event)

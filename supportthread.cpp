@@ -129,7 +129,7 @@ void supportThread::run()
             }
         }
     }
-    qDebug() << smd->supportlist.size();
+//    qDebug() << "smd->supportlist.size()" << smd->supportlist.size();
     emit addfinish();
 }
 

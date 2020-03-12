@@ -86,7 +86,7 @@ void MProgressBar::mousePressEvent(QMouseEvent *event)
 {
     if((event->buttons() & Qt::LeftButton) && type == "drag")
     {
-        int m = event->pos().x();
+        int m = event->pos().x();        
         nows = m/(float)(this->width()-img.width())*maxs;
         if(nows > maxs)
         {

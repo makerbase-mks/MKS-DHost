@@ -75,3 +75,8 @@ void RightLabel::setIsOff(bool isoff)
     this->isoff = isoff;
     this->update();
 }
+
+void RightLabel::clickevent(bool isoff) {
+    emit OnClicked(isoff);
+    this->update();
+}

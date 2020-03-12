@@ -26,6 +26,16 @@ MSupport::MSupport(int fid, QString supporttype, QVector3D toppoint)
     origonbot->vertex[1] = QVector3D(0, 0, 0);
     origonbot->vertex[2] = QVector3D(0, 0, 0);
     needbot = true;
+    haveTurn = false;
+}
+
+MSupport::MSupport()
+{
+}
+
+void MSupport::setNeedBot(bool needbot)
+{
+    this->needbot = needbot;
 }
 
 MSupport::~MSupport()
@@ -49,6 +59,53 @@ void MSupport::setOP(QVector3D offset, QVector3D pos)
     this->mpos = pos;
 }
 
+void MSupport::setTurnpoint(QVector3D trunpoint)
+{
+    haveTurn = true;
+    this->turnpoint = trunpoint;
+}
+
+void MSupport::setThreePoint(QVector3D fhead, QVector3D shead, QVector3D thead, QVector3D fdist, QVector3D sdist, QVector3D tdist)
+{
+    this->fhead = fhead;
+    this->shead = shead;
+    this->thead = thead;
+    this->fdist = fdist;
+    this->sdist = sdist;
+    this->tdist = tdist;
+}
+
+void MSupport::updateHead(QString headname, QVector3D headpos, QVector3D headdist)
+{
+    if(headname == "fhead")
+    {
+        fhead = headpos;
+        fdist = headdist;
+    }else if(headname == "shead")
+    {
+        shead = headpos;
+        sdist = headdist;
+    }else if(headname == "thead")
+    {
+        thead = headpos;
+        tdist = headdist;
+    }
+}
+
+QVector3D MSupport::getHead(QString headname)
+{
+    if(headname == "fhead")
+    {
+        return fhead;
+    }else if(headname == "shead")
+    {
+        return shead;
+    }else if(headname == "thead")
+    {
+        return thead;
+    }
+}
+
 void MSupport::setTri(triangle* toptrii, triangle* bottri)
 {
 
@@ -68,9 +125,34 @@ void MSupport::setShape(QString shape)
     supportshape = shape;
 }
 
+void MSupport::setMidSupportShape(QString shape)
+{
+    midsupportshape = shape;
+}
+
+void MSupport::setTopSize(QString ttype,QString ttouchtype,float len,float ttouchsize,float wid)
+{
+    toptype = ttype;
+    touchtype = ttouchtype;
+    toplen = len;
+    touchtypesize = ttouchsize;
+    topwidth = wid;
+}
+
+void MSupport::setMidWidth(float midwith){
+    midwidth = midwith;
+}
+void MSupport::setBotSupportShape(QString shape,float wid,float conesize,float ballsize){
+    botsupportshape = shape;
+    botwidth = wid;
+    botconesize = conesize;
+    botballsize = ballsize;
+}
 void MSupport::getSupportShape(std::vector<triangle> &mlist, QVector3D &mmx)
 {
-    if(supportshape == "square")
+    if (midsupportshape == "cube") {
+        getCube(mlist, mmx);
+    }else if(supportshape == "square")
     {
         getSquare(mlist, mmx);
     }else if(supportshape == "cylinder")
@@ -89,6 +171,16 @@ void MSupport::setOthers(int fid, QString supporttype, QVector3D toppoint)
 void MSupport::setWaylen(double waylen)
 {
     this->waylen = waylen;
+}
+
+void MSupport::setCursorPoint(QVector3D cursorpoint)
+{
+    this->cursorpoint = cursorpoint;
+}
+
+QVector3D MSupport::getCursorPoint()
+{
+    return this->cursorpoint;
 }
 
 void MSupport::setASize(QVector3D botsize, QVector3D midsize)
@@ -126,7 +218,7 @@ void MSupport::updateOutPutlist()
         rotatPoint(tri.normal, nrotation.z(), QVector3D(0, 0, 1));
         for(int v = 0; v < 3; v++)
         {
-            tri.vertex[v] *= nscaled;
+//            tri.vertex[v] *= nscaled;
             rotatPoint(tri.vertex[v], nrotation.z(), QVector3D(0, 0, 1));
             tri.vertex[v].setZ(tri.vertex[v].z() + moffset.z());
         }
@@ -140,12 +232,12 @@ void MSupport::outputmodel(std::vector<triangle> &modeloutputlist)
     {
         triangle tri = trilist[i];
 //        rotatPoint(tri.normal, nrotation.z(), QVector3D(0, 0, 1));
-        for(int v = 0; v < 3; v++)
-        {
-            tri.vertex[v] *= nscaled;
+//        for(int v = 0; v < 3; v++)
+//        {
+//            tri.vertex[v] *= nscaled;
 //            rotatPoint(tri.vertex[v], nrotation.z(), QVector3D(0, 0, 1));
 //            tri.vertex[v].setZ(tri.vertex[v].z() + moffset.z());
-        }
+//        }
         modeloutputlist.push_back(tri);
     }
 }
@@ -489,27 +581,99 @@ void MSupport::setScaled(QVector3D mscaled)
 //    origonbotpoint.setZ(botpoint.z()/mscaled.z());
 }
 
+QString MSupport::getPickPart(QVector3D cursorpoint)
+{
+    qreal d1, d2, d3, fd, sd, td;
+    QVector3D ds1, ds2, ds3, fds, sds, tds;
+    ds1 = cursorpoint-this->cursorpoint;
+    ds2 = cursorpoint-origontoppoint;
+    ds3 = cursorpoint-origonbotpoint;
+    d1 = sqrt(pow(ds1.x(), 2)+pow(ds1.y(), 2)+pow(ds1.z(), 2));
+    d2 = sqrt(pow(ds2.x(), 2)+pow(ds2.y(), 2)+pow(ds2.z(), 2));
+    d3 = sqrt(pow(ds3.x(), 2)+pow(ds3.y(), 2)+pow(ds3.z(), 2));
+    qDebug() << "getPickPart" << fhead << shead << thead;
+    if(botfaceid != -1)
+    {
+        fds = cursorpoint-fhead;
+        sds = cursorpoint-shead;
+        tds = cursorpoint-thead;
+        fd = sqrt(pow(fds.x(), 2)+pow(fds.y(), 2)+pow(fds.z(), 2));
+        sd = sqrt(pow(sds.x(), 2)+pow(sds.y(), 2)+pow(sds.z(), 2));
+        td = sqrt(pow(tds.x(), 2)+pow(tds.y(), 2)+pow(tds.z(), 2));
+        if(d3 < d2)
+        {
+            if(d3 < fd && d3 < sd && d3 < td)
+            {
+                return "null";
+            }else if(fd < sd && fd < td)
+            {
+                return "fhead";
+            }else if(sd < fd && sd < td)
+            {
+                return "shead";
+            }else if(td<fd && td<sd)
+            {
+                return "thead";
+            }
+        }else{
+            if(d1 < d2)
+            {
+                return "top";
+            }else{
+                return "mid";
+            }
+        }
+    }else{
+        if(d1 < d2)
+        {
+            return "top";
+        }else{
+            return "mid";
+        }
+    }
+    return "null";
+}
+
+QVector3D MSupport::getMPos()
+{
+    return mpos;
+}
+
 void MSupport::addfinish()
 {
     setupList();
     FormSupportList();
 }
 
-void MSupport::setupList()
+void MSupport::supMove(QVector3D toppoint, QVector3D botpoint)
 {
+    origontoppoint = toppoint;
+    origonbotpoint = botpoint;
+}
+
+void MSupport::setupList()
+{ //supporttype == "free"只有这种
     trilist.clear();
     std::vector<triangle> bottomlist;
     std::vector<triangle> midlist;
     std::vector<triangle> toplist;
     std::vector<triangle> connectlist;
+     std::vector<triangle> topconnectlist;
+    float botheight = 0;
     double distance;
-    double dlen, nearscale, farscale;
+    double dlen, nearscale, farscale,bollwidth;
     dlen = 2;
-    QVector3D minmax, midsize, botpos, topsize;
-    if(botfaceid == -1)
-    {
-        getSupportShape(bottomlist, minmax);
+    QVector3D minmax, midsize, botpos, topsize,toppos;
+    if(needbot)
+    {//添加底座
+        if (botsupportshape == "cone") {
+             getCylinder(bottomlist, minmax); //底座固定的形状
+        }else {
+             getSquare(bottomlist, minmax); //底座固定的形状
+        }
+//        getSupportShape(bottomlist, minmax);
         QVector3D bottomsize = QVector3D(botsize.x()/minmax.x(), botsize.y()/minmax.y(), botsize.z()/minmax.z());
+        botheight = bottomsize.z();
         botpos = origonbotpoint;
         botpos.setZ(origonbotpoint.z()+(minmax.z()*bottomsize.z())/2-mpos.z());
         ROStrilist(bottomlist, QVector3D(0, 0, 0), bottomsize, botpos);
@@ -534,9 +698,9 @@ void MSupport::setupList()
     }else if(supporttype == "free")
     {
         getSupportShape(midlist, minmax);
-        midsize = QVector3D(middsize.x()/minmax.x(),
-                            middsize.y()/minmax.y(),
-                            (origontoppoint.z()-origonbotpoint.z())/minmax.z()+mpos.z());
+        midsize = QVector3D(midwidth/minmax.x(),
+                            midwidth/minmax.y(),
+                            (origontoppoint.z()-origonbotpoint.z()+mpos.z())/minmax.z());
         botpos = origonbotpoint;
         botpos.setZ(origonbotpoint.z()+(minmax.z()*midsize.z())/2-mpos.z());
         ROStrilist(midlist, QVector3D(0,0,0), midsize, botpos);
@@ -544,33 +708,158 @@ void MSupport::setupList()
         {
             trilist.push_back(midlist[i]);
         }
-        getConeTop(toplist, minmax);
-        topsize = QVector3D(midsize.x(),midsize.y(),waylen/minmax.z());
-        double xangle = qAcos(origontop->normal.z())*(180/M_PI)+180;
-        double zangle = qAtan2(origontop->normal.y()*0.2, origontop->normal.x()*0.2)*(180/M_PI)-90;
+         QVector3D spherepoint = cursorpoint;
+          QVector3D newpoint;
+        if(touchtype == "sphere") {
+            bollwidth = touchtypesize;
+             getBallConnect(topconnectlist, minmax);//支撑球形
+             midsize = QVector3D(bollwidth/minmax.x(), bollwidth/minmax.x(), bollwidth/minmax.x());
+             double r = sqrt(pow(toptri->normal.x(),2)+pow(toptri->normal.y(),2)+pow(toptri->normal.z(),2));
+             toppos = cursorpoint + toptri->normal*(bollwidth*3/8/r);
+//             toppos = cursorpoint;
+             toppos.setZ(toppos.z() + bollwidth/2);
+             ROStrilist(topconnectlist, QVector3D(0,0,0), midsize, toppos);
+             for(int i = 0; i < topconnectlist.size(); i++)
+             {
+                 trilist.push_back(topconnectlist[i]);
+             }
+             newpoint = cursorpoint + toptri->normal*(bollwidth/2/r);
+        }else {
+            bollwidth = 0;
+            newpoint = cursorpoint;
+        }
+
+        if (toptype == "cube") {
+            getCube(toplist, minmax);
+        }else {
+            getConeTop(toplist, minmax); //支撑的上部分
+        }
+        double scale;
+        QVector3D normalpoint = newpoint-origontoppoint;
+        distance = sqrt(pow(normalpoint.x(),2)+pow(normalpoint.y(),2)+pow(normalpoint.z(),2));
+        double xangle = qAcos(normalpoint.z()/distance)*(180/M_PI);
+        double zangle = qAtan2(normalpoint.y()*0.3, normalpoint.x()*0.3)*(180/M_PI)-90;
         if(zangle <= 90)
         {
             zangle += 180;
         }
-        distance = sqrt(pow(origontop->normal.x(),2)+pow(origontop->normal.y(),2)+pow(origontop->normal.z(),2));
         farscale = (waylen/2)/distance;
-        QVector3D toppos = origontoppoint - origontop->normal*farscale;
+        topsize = QVector3D(topwidth/minmax.x(),topwidth/minmax.y(),distance/minmax.z());
+//         QVector3D newpoint;
+//         double r = sqrt(pow(toptri->normal.x(),2)+pow(toptri->normal.y(),2)+pow(toptri->normal.z(),2));
+//         newpoint = cursorpoint + toptri->normal*(bollwidth/2/r);
+        QVector3D toppos = newpoint - normalpoint/2;
         ROStrilist(toplist, QVector3D(xangle, 0, zangle), topsize, toppos);
         for(int i = 0; i < toplist.size(); i++)
         {
             trilist.push_back(toplist[i]);
         }
-        getBallConnect(connectlist, minmax);
-        midsize = QVector3D(middsize.x()/minmax.x(), middsize.x()/minmax.x(), middsize.x()/minmax.x());
+
+        getBallConnect(connectlist, minmax);//支撑的上部分和竖柱连接的球形
+        midsize = QVector3D(midwidth/minmax.x(), midwidth/minmax.x(), midwidth/minmax.x());
 //        midsize = QVector3D(midsize.x()/minmax.x(), midsize.y()/minmax.y(), midsize.z()/minmax.z());
         toppos = origontoppoint;
-        toppos.setZ(toppos.z()+middsize.x()/2);
+        toppos.setZ(toppos.z()+midwidth/2);
         ROStrilist(connectlist, QVector3D(0, 0, 0), midsize, toppos);
         for(int i = 0; i<connectlist.size(); i++)
         {
             trilist.push_back(connectlist[i]);
         }
 
+        if(botfaceid != -1 && !haveTurn)
+        {
+            botpos = origonbotpoint;
+            botpos.setZ(botpos.z()+botballsize/2-mpos.z());
+            getBallConnect(connectlist, minmax);
+            midsize = QVector3D(botballsize/minmax.x(), botballsize/minmax.x(), botballsize/minmax.x());
+            ROStrilist(connectlist, QVector3D(0, 0, 0), midsize, botpos);
+            for(int i = 0; i<connectlist.size(); i++)
+            {
+                trilist.push_back(connectlist[i]);
+            }
+            getBallConnect(connectlist, minmax);
+            botpos = fhead;
+            botpos.setZ(botpos.z()+botballsize-mpos.z());
+            ROStrilist(connectlist, QVector3D(0, 0, 0), midsize, botpos);
+            for(int i=0; i<connectlist.size(); i++)
+            {
+                trilist.push_back(connectlist[i]);
+            }
+            getBallConnect(connectlist, minmax);
+            botpos = shead;
+            botpos.setZ(botpos.z()+botballsize-mpos.z());
+            ROStrilist(connectlist, QVector3D(0, 0, 0), midsize, botpos);
+            for(int i=0; i<connectlist.size(); i++)
+            {
+                trilist.push_back(connectlist[i]);
+            }
+            getBallConnect(connectlist, minmax);
+            botpos = thead;
+            botpos.setZ(botpos.z()+botballsize-mpos.z());
+            ROStrilist(connectlist, QVector3D(0, 0, 0), midsize, botpos);
+            for(int i=0; i<connectlist.size(); i++)
+            {
+                trilist.push_back(connectlist[i]);
+            }
+            //fhead
+            getConeTop(connectlist, minmax); //底部支撑的三个叉
+            QVector3D normal;
+            QVector3D tempdistance = QVector3D(fdist.x(), fdist.y(), origonbotpoint.z()-fhead.z());
+            normal = fhead-origonbotpoint;
+            distance = sqrt(pow(tempdistance.x(),2)+pow(tempdistance.y(),2)+pow(tempdistance.z(),2));
+            xangle = qAcos(normal.z()/distance)*(180/M_PI);
+            zangle = qAtan2(normal.y()*0.3, normal.x()*0.3)*(180/M_PI)-90;
+            if(zangle <= 90)
+            {
+                zangle += 180;
+            }
+            botpos = origonbotpoint+tempdistance/2;
+            botpos.setZ(botpos.z()- tempdistance.z()+botconesize/2-mpos.z());
+            midsize = QVector3D(botconesize/minmax.x(),botconesize/minmax.x(), distance);
+            ROStrilist(connectlist, QVector3D(xangle, 0, zangle), midsize, botpos);
+            for(int i=0; i<connectlist.size(); i++)
+            {
+                trilist.push_back(connectlist[i]);
+            }
+            //shead
+            getConeTop(connectlist, minmax);//底部支撑的三个叉
+            normal = shead-origonbotpoint;
+            tempdistance = QVector3D(sdist.x(), sdist.y(), origonbotpoint.z()-shead.z());
+            distance = sqrt(pow(tempdistance.x(),2)+pow(tempdistance.y(),2)+pow(tempdistance.z(),2));
+            xangle = qAcos(normal.z()/distance)*(180/M_PI);
+            zangle = qAtan2(normal.y()*0.3, normal.x()*0.3)*(180/M_PI)-90;
+            if(zangle <= 90)
+            {
+                zangle += 180;
+            }
+            botpos = origonbotpoint+tempdistance/2;
+            botpos.setZ(botpos.z()- tempdistance.z()+botconesize/2-mpos.z());
+            midsize = QVector3D(botconesize/minmax.x(), botconesize/minmax.x(), distance);
+            ROStrilist(connectlist, QVector3D(xangle, 0, zangle), midsize, botpos);
+            for(int i=0; i<connectlist.size(); i++)
+            {
+                trilist.push_back(connectlist[i]);
+            }
+            //thead
+            getConeTop(connectlist, minmax);//底部支撑的三个叉
+            tempdistance = QVector3D(tdist.x(), tdist.y(), origonbotpoint.z()-thead.z());
+            normal = thead-origonbotpoint;
+            distance = sqrt(pow(tempdistance.x(),2)+pow(tempdistance.y(),2)+pow(tempdistance.z(),2));
+            xangle = qAcos(normal.z()/distance)*(180/M_PI);
+            zangle = qAtan2(normal.y()*0.3, normal.x()*0.3)*(180/M_PI)-90;
+            if(zangle <= 90)
+            {
+                zangle += 180;
+            }
+            botpos = origonbotpoint+tempdistance/2;
+            botpos.setZ(botpos.z()- tempdistance.z()+botconesize/2-mpos.z());
+            midsize = QVector3D(botconesize/minmax.x(), botconesize/minmax.x(), distance);
+            ROStrilist(connectlist, QVector3D(xangle, 0, zangle), midsize, botpos);
+            for(int i=0; i<connectlist.size(); i++)
+            {
+                trilist.push_back(connectlist[i]);
+            }
+        }
     }else if(supporttype == "face")
     {
        distance = sqrt(pow(origontop->normal.x(),2)+pow(origontop->normal.y(),2)+pow(origontop->normal.z(),2));
@@ -628,7 +917,10 @@ void MSupport::setupList()
 
 void MSupport::getTopList(std::vector<triangle> &mlist, triangle nearpoint, triangle farpoint)
 {
-    mlist.clear();
+    while(mlist.size()>0)
+    {
+        mlist.erase(mlist.begin());
+    }
     triangle tri;
     tri.vertex[0] = nearpoint.vertex[0];
     tri.vertex[1] = nearpoint.vertex[1];
@@ -688,38 +980,59 @@ void MSupport::ROStrilist(std::vector<triangle> &mlist, QVector3D rotate, QVecto
     }
 }
 
+void MSupport::getData(QString datakey, QString &data, QString defaultvalue)
+{
+    QSettings settings("makerbase", "mksdlp");
+    data = settings.value(datakey).toString();
+    if(data == "")
+    {
+        settings.setValue(datakey, defaultvalue);
+        data = defaultvalue;
+    }
+}
+
+
 bool MSupport::FormSupportList()
 {
     unsigned int l;
     unsigned int t;
     const unsigned int listSize = 10000;//each list to be 10000 triangles big.
     unsigned int tSeamCount = 0;
-
     for( l = 0; l < normDispLists.size(); l++)
     {
-        glDeleteLists(normDispLists[l],1);
+        glDeleteLists(normDispLists[l], 1);
     }
-    normDispLists.push_back(glGenLists(1));
+    if(normDispLists.size() == 0)
+    {
+        normDispLists.push_back(glGenLists(1));
+    }
     if(normDispLists.at(normDispLists.size()-1) == 0)
+    {
         return false;//failure to allocate a list index???
-    glNewList(normDispLists.at(normDispLists.size()-1),GL_COMPILE);
+    }
+    glNewList(normDispLists.at(0),GL_COMPILE);
     glBegin(GL_TRIANGLES);// Drawing Using Triangles
+    int nmlist = 0;
     for(int i = 0; i < trilist.size(); i++)
     {
-        glNormal3f(trilist[i].normal.x(), trilist[i].normal.y(), trilist[i].normal.z());
-        glVertex3f(trilist[i].vertex[0].x(),trilist[i].vertex[0].y(),trilist[i].vertex[0].z());
-        glVertex3f(trilist[i].vertex[1].x(),trilist[i].vertex[1].y(),trilist[i].vertex[1].z());
-        glVertex3f(trilist[i].vertex[2].x(),trilist[i].vertex[2].y(),trilist[i].vertex[2].z());
+        glNormal3f(trilist[i].normal.x(), trilist[i].normal.y(), trilist[i].normal.z() + 2);
+        glVertex3f(trilist[i].vertex[0].x(),trilist[i].vertex[0].y(),trilist[i].vertex[0].z()+moffset.z());
+        glVertex3f(trilist[i].vertex[1].x(),trilist[i].vertex[1].y(),trilist[i].vertex[1].z()+moffset.z());
+        glVertex3f(trilist[i].vertex[2].x(),trilist[i].vertex[2].y(),trilist[i].vertex[2].z()+moffset.z());
         if(tSeamCount >= listSize)
         {
+            nmlist ++;
             glEnd();
             glEndList();
-            normDispLists.push_back(glGenLists(1));
+            if(nmlist > normDispLists.size()-1)
+            {
+                normDispLists.push_back(glGenLists(1));
+            }
             if(normDispLists.at(normDispLists.size()-1) == 0)
             {
                 return false;
             }
-            glNewList(normDispLists.at(normDispLists.size()-1),GL_COMPILE);
+            glNewList(normDispLists.at(nmlist),GL_COMPILE);
             glBegin(GL_TRIANGLES);// Drawing Using Triangles
             tSeamCount = 0;
         }
@@ -729,9 +1042,12 @@ bool MSupport::FormSupportList()
     glEndList();
 }
 
-void MSupport::getSquare(std::vector<triangle> &mlist, QVector3D &mmx)
+void MSupport::getCube(std::vector<triangle> &mlist, QVector3D &mmx)
 {
-    mlist.clear();
+    while(mlist.size()>0)
+    {
+        mlist.erase(mlist.begin());
+    }
     triangle mtri;
     mmx = QVector3D(10, 10, 10);
     QVector3D normal;
@@ -808,9 +1124,95 @@ void MSupport::getSquare(std::vector<triangle> &mlist, QVector3D &mmx)
     }
 }
 
+void MSupport::getSquare(std::vector<triangle> &mlist, QVector3D &mmx)
+{
+    while(mlist.size()>0)
+    {
+        mlist.erase(mlist.begin());
+    }
+    triangle mtri;
+    mmx = QVector3D(14, 14, 10);
+    QVector3D normal;
+    mtri.vertex[0] = QVector3D(-7, 7, 5);
+    mtri.vertex[1] = QVector3D(-7, -7, 5);
+    mtri.vertex[2] = QVector3D(7, -7, 5);
+    mlist.push_back(mtri);
+
+    mtri.vertex[0] = QVector3D(7, -7, 5);
+    mtri.vertex[1] = QVector3D(7, 7, 5);
+    mtri.vertex[2] = QVector3D(-7, 7, 5);
+    mlist.push_back(mtri);
+
+    mtri.vertex[0] = QVector3D(-5, -5, -5);
+    mtri.vertex[1] = QVector3D(5, -5, -5);
+    mtri.vertex[2] = QVector3D(7, -7, 5);
+    mlist.push_back(mtri);
+
+    mtri.vertex[0] = QVector3D(7, -7, 5);
+    mtri.vertex[1] = QVector3D(-7, -7, 5);
+    mtri.vertex[2] = QVector3D(-5, -5, -5);
+    mlist.push_back(mtri);
+
+    mtri.vertex[0] = QVector3D(-5, 5, -5);
+    mtri.vertex[1] = QVector3D(-5, -5, -5);
+    mtri.vertex[2] = QVector3D(-7, -7, 5);
+    mlist.push_back(mtri);
+
+    mtri.vertex[0] = QVector3D(-7, -7, 5);
+    mtri.vertex[1] = QVector3D(-7, 7, 5);
+    mtri.vertex[2] = QVector3D(-5, 5, -5);
+    mlist.push_back(mtri);
+
+    mtri.vertex[0] = QVector3D(5, 5, -5);
+    mtri.vertex[1] = QVector3D(-5, 5, -5);
+    mtri.vertex[2] = QVector3D(-7, 7, 5);
+    mlist.push_back(mtri);
+
+    mtri.vertex[0] = QVector3D(-7, 7, 5);
+    mtri.vertex[1] = QVector3D(7, 7, 5);
+    mtri.vertex[2] = QVector3D(5, 5, -5);
+    mlist.push_back(mtri);
+
+    mtri.vertex[0] = QVector3D(-5, 5, -5);
+    mtri.vertex[1] = QVector3D(5, 5, -5);
+    mtri.vertex[2] = QVector3D(5, -5, -5);
+    mlist.push_back(mtri);
+
+    mtri.vertex[0] = QVector3D(5, -5, -5);
+    mtri.vertex[1] = QVector3D(-5, -5, -5);
+    mtri.vertex[2] = QVector3D(-5, 5, -5);
+    mlist.push_back(mtri);
+
+    mtri.vertex[0] = QVector3D(7, -7, 5);
+    mtri.vertex[1] = QVector3D(5, -5, -5);
+    mtri.vertex[2] = QVector3D(5, 5, -5);
+    mlist.push_back(mtri);
+
+    mtri.vertex[0] = QVector3D(5, 5, -5);
+    mtri.vertex[1] = QVector3D(7, 7, 5);
+    mtri.vertex[2] = QVector3D(7, -7, 5);
+    mlist.push_back(mtri);
+
+    for(int i = 0; i < mlist.size(); i++)
+    {
+        mtri = mlist[i];
+        normal = QVector3D::crossProduct(mtri.vertex[1]-mtri.vertex[0], mtri.vertex[2]-mtri.vertex[0]);
+        float lens = sqrt(pow(normal.x(), 2)+pow(normal.y(), 2)+pow(normal.z(), 2));
+        normal.setX(normal.x()/lens);
+        normal.setY(normal.y()/lens);
+        normal.setZ(normal.z()/lens);
+        normal.normalize();
+        mlist[i].normal = normal;
+    }
+}
+
 void MSupport::getCylinder(std::vector<triangle> &mlist, QVector3D &mmx)
 {
-    mlist.clear();
+    // 模型底座数据（底座形状固定，根据读取的文件模型大小再缩放）
+    while(mlist.size()>0)
+    {
+        mlist.erase(mlist.begin());
+    }
     triangle mtri;
     QVector3D mmax,mmin, mfset, normal;
     mmax = QVector3D(60.2911, 95.702003, 1.00076);
@@ -1045,7 +1447,11 @@ void MSupport::getCylinder(std::vector<triangle> &mlist, QVector3D &mmx)
 
 void MSupport::getBallConnect(std::vector<triangle> &mlist, QVector3D &mmx)
 {
-    mlist.clear();
+//    mlist.clear();
+    while(mlist.size()>0)
+    {
+        mlist.erase(mlist.begin());
+    }
     triangle mtri;
     QVector3D mmax,mmin, mfset, normal;
     mmax = QVector3D(20.000000, 20.000000, 40.000000);
@@ -3473,7 +3879,10 @@ void MSupport::getBallConnect(std::vector<triangle> &mlist, QVector3D &mmx)
 
 void MSupport::getConeTop(std::vector<triangle> &mlist, QVector3D &mmx)
 {
-    mlist.clear();
+    while(mlist.size()>0)
+    {
+        mlist.erase(mlist.begin());
+    }
     triangle mtri;
     QVector3D mmax,mmin, mfset, normal;
     mmax = QVector3D(-5.1975064, 0.002493781, 1.0);
@@ -7380,10 +7789,10 @@ void MSupport::getConeTop(std::vector<triangle> &mlist, QVector3D &mmx)
 
 QVector3D MSupport::getBotpoint()
 {
-    return botpoint;
+    return origonbotpoint;
 }
 
 QVector3D MSupport::getToppoint()
 {
-    return toppoint;
+    return origontoppoint;
 }

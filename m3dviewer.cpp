@@ -26,6 +26,9 @@ M3DViewer::M3DViewer(MainWindow *mparent,QWidget *parent) : QGLWidget(parent)
     getObj = false;
     waylen = 3;
     dscale = 1;
+    picksupportpart = "None";
+    saveopera = true;
+    currentoperaindex = 0;
 
     tri = new triangle;
     bottri = new triangle;
@@ -35,8 +38,12 @@ M3DViewer::M3DViewer(MainWindow *mparent,QWidget *parent) : QGLWidget(parent)
 
     takeScreenShot = false;
 
+//    smd->hasuplift = false;
+
     QString bd;
     int st;
+    getData("mksdlp_toplength", bd, "3");
+    waylen = bd.toDouble();
     getData("mksdlp_supportshape", bd, "0");
     st = bd.toInt();
     switch(st){
@@ -48,6 +55,20 @@ M3DViewer::M3DViewer(MainWindow *mparent,QWidget *parent) : QGLWidget(parent)
         break;
     default:
         supportshape = "square";
+        break;
+    }
+
+    getData("mksdlp_midtype", bd, "0");
+    st = bd.toInt();
+    switch(st){
+    case 0:
+        midsupportshape = "cone";
+        break;
+    case 1:
+        midsupportshape = "cube";
+        break;
+    default:
+        midsupportshape = "cone";
         break;
     }
 
@@ -274,9 +295,23 @@ M3DViewer::M3DViewer(MainWindow *mparent,QWidget *parent) : QGLWidget(parent)
     connect(copybutton, SIGNAL(buttonClick()), this, SLOT(copyModel()));
 //    copybutton->setGeometry(this->width());
 
+    QWidget *operationwidget = new QWidget();
+    QGridLayout *operationlayout = new QGridLayout();
+    mButton *undobtn = new mButton(this, ":/resource/icon/undo.png", ":/resource/icon/undo_press.png");
+    connect(undobtn,SIGNAL(buttonClick()),this,SLOT(undoModel()));
+    mButton *redobtn = new mButton(this, ":/resource/icon/redo.png", ":/resource/icon/redo_press.png");
+    connect(redobtn,SIGNAL(buttonClick()),this,SLOT(redoModel()));
+    operationlayout->addWidget(undobtn,0,0);
+    operationlayout->addWidget(redobtn,0,1);
+    operationwidget->setLayout(operationlayout);
+    operationwidget->setGeometry(160, 10, 80, 60);
+    operationwidget->setParent(this);
+//    operationwidget->setStyleSheet("background-color: red;");
+    operationwidget->setAttribute(Qt::WA_TranslucentBackground, true);
     animfinish = true;
     tm = new QTimer(this);
     connect(tm, SIGNAL(timeout()), this, SLOT(OnAnimFinish()));
+    operationwidget->hide();
 
     mscale = QVector3D(1, 1, 1);
     mposition = QVector3D(0, 0, 0);
@@ -294,6 +329,10 @@ M3DViewer::M3DViewer(MainWindow *mparent,QWidget *parent) : QGLWidget(parent)
     cursorNormal3D = QVector3D(0,0,0);
     cursorPreDragPos3D = QVector3D(0,0,0);
     cursorPostDragPos3D = QVector3D(0,0,0);
+
+    fhead = QVector3D(0, 0, 0);
+    shead = QVector3D(0, 0, 0);
+    thead = QVector3D(0, 0, 0);
 
     perspective = true;
     hideNonActiveSupports = false;
@@ -319,13 +358,15 @@ M3DViewer::M3DViewer(MainWindow *mparent,QWidget *parent) : QGLWidget(parent)
     setMouseTracking(true);
     supportfocusid = -1;
     string_selectmodel = tr("please select a model");
+    string_finishopera = tr("please finish opera first");
+    str_wait = tr("Please wait");
     mpb = new MProgressBar();
     mpb->setParent(this);
     mpb->setGeometry(200, 200, 200, 20);
     mpb->isShowText(false);
     mpb->setProgress(50);
     mpb->hide();
-    updatingModel = false;
+//    updatingModel = false;
     mThread = new updateThread();
     supThread = new supportThread();
     connect(supThread, SIGNAL(addfinish()), this, SLOT(autoSupportFinish()));
@@ -333,6 +374,8 @@ M3DViewer::M3DViewer(MainWindow *mparent,QWidget *parent) : QGLWidget(parent)
     selectid = -1;
     connect(mThread, SIGNAL(updateProgress(int)), this, SLOT(updateProgress(int)));
     connect(mThread, SIGNAL(updatemodel(ModelData*)), this, SLOT(updateModel(ModelData*)));
+
+    loadfileerror = tr("load file error");
 }
 
 static void fitAngle(float &angle)
@@ -568,6 +611,10 @@ void M3DViewer::UpdateLanguage()
 
     slicemodel->setLText(tr("Slice"));
     string_selectmodel = tr("please select a model");
+
+    string_finishopera = tr("please finish opera first");
+    str_wait = tr("Please wait");
+    loadfileerror = tr("load file error");
 }
 
 void M3DViewer::hideWidget()
@@ -632,6 +679,10 @@ void M3DViewer::OnRotateChange(QString result)
     {
         return;
     }
+//    if (updatingModel) {
+//        showToast(str_wait, 2);
+//        return;
+//    }
     NumberEdit *mb = (NumberEdit*)sender();
     QString way = mb->objectName();
     float dregree = result.toFloat();
@@ -653,6 +704,10 @@ void M3DViewer::OnRotateChange(QString result)
     {
         mrotation.setZ(dregree);
     }
+    if (smd->getRotation() != mrotation && !rotatepanel->isHidden()) {
+        saveopera = true;
+        saveOperaData(selectid,mscale,smd->getRotation(),mposition);
+    }
     smd->setRotation(mrotation);
     updatingModel = true;
     mThread->initUpdateThread(smd);
@@ -671,6 +726,10 @@ void M3DViewer::OnPositionChange(QString result)
     {
         return;
     }
+//    if (updatingModel) {
+//        showToast(str_wait, 2);
+//        return;
+//    }
     NumberEdit *mb = (NumberEdit*)sender();
     QString way = mb->objectName();
     if(way == "x")
@@ -683,12 +742,17 @@ void M3DViewer::OnPositionChange(QString result)
     {
         mposition.setZ(result.toFloat());
     }
+    if (smd->getPosition() != mposition && !positionpanel->isHidden()) {
+        saveopera = true;
+        saveOperaData(selectid,mscale,mrotation,smd->getPosition());
+    }
     smd->setPosition(mposition);
 //    smd->updateOutput();
     updatingModel = true;
     mThread->initUpdateThread(smd);
     mThread->start();
 //    initPanelData();
+
 }
 
 void M3DViewer::OnSizeChange(QString result)
@@ -701,6 +765,10 @@ void M3DViewer::OnSizeChange(QString result)
     {
         return;
     }
+//    if (updatingModel) {
+//        showToast(str_wait, 2);
+//        return;
+//    }
     NumberEdit *mb = (NumberEdit*)sender();
     QString way = mb->objectName();
     QVector3D origonsize = smd->origonSize;
@@ -724,9 +792,13 @@ void M3DViewer::OnSizeChange(QString result)
         mscale.setY(msss);
         mscale.setZ(msss);
     }
+    if (smd->getScale() != mscale && !scaledpanel->isHidden()) {
+        saveopera = true;
+        saveOperaData(selectid,smd->getScale(),mrotation,mposition);
+    }
     smd->setScale(mscale);
 //    smd->updateOutput();
-    updatingModel = true;
+//    updatingModel = true;
     mThread->initUpdateThread(smd);
     mThread->start();
 //    initPanelData();
@@ -750,7 +822,7 @@ void M3DViewer::OnResetData()
         smd->setScale(mscale);
     }
 //    smd->updateOutput();
-    updatingModel = true;
+//    updatingModel = true;
     mThread->initUpdateThread(smd);
     mThread->start();
 //    initPanelData();
@@ -1016,7 +1088,7 @@ void M3DViewer::setZRotation(float angle)
 
 void M3DViewer::setSType(QString stype)
 {
-    supporttype = stype;
+    supporttype = "free";
     paintGL();
 }
 
@@ -1030,11 +1102,14 @@ void M3DViewer::mousePressEvent(QMouseEvent *event)
 {
     mouseLastPos = event->pos();
     mouseDownInitialPos = event->pos();
-    if((event->buttons() & Qt::LeftButton) && currtool == "move" && !updatingModel)
-    {
+    if((event->buttons() & Qt::LeftButton) && currtool == "move")
+    {// && !updatingModel
+        saveopera = true;
+        saveOperaData(selectid,mscale,mrotation,mposition);
         update3DPos(event->x(), event->y());
     }else if((event->buttons() & Qt::LeftButton) && (currtool == "add" || currtool == "auto"))
     {
+        //添加支撑
         if(triid == -1|| tri->normal.z() >= 0)
         {
             return;
@@ -1046,6 +1121,13 @@ void M3DViewer::mousePressEvent(QMouseEvent *event)
     }else if((event->buttons() & Qt::LeftButton) && currtool == "copy")
     {
         mparent->copyModel(selectid, mousePlatformPos);
+    }else if((event->buttons() & Qt::LeftButton) && currtool == "edit")
+    {
+        //编辑支撑
+        if(selectid != -1)
+        {
+            rePaintSupport(event->x(), event->y());
+        }
     }
 }
 
@@ -1059,16 +1141,72 @@ void M3DViewer::deleteSupport()
     supportfocusid = -1;
 }
 
+void M3DViewer::delAllSupport()
+{
+//    qDebug() << "delAllSupport";
+    if(selectid == -1)
+    {
+        return;
+    }
+    while (smd->supportlist.size() > 0) {
+        smd->supportlist.erase(smd->supportlist.begin());
+        supportfocusid = -1;
+    }
+
+    if (smd->hasuplift) {
+        QString data;
+        float zoffset;
+        bool b = false;
+        mparent->getData("mksdlp_supportuplift", data, "5");
+        data.toFloat(&b);
+        if(!b)
+        {
+            zoffset = 5;
+        }else{
+            zoffset = data.toFloat();
+        }
+        if (smd->hasBase) {
+            mposition.setZ(mposition.z() - zoffset + smd->getScale().z());
+        }else {
+            mposition.setZ(mposition.z() - zoffset);
+        }
+        smd->setPosition(mposition);
+        smd->hasuplift = false;
+//        updatingModel = true;
+        mThread->initUpdateThread(smd);
+        mThread->start();
+    }
+
+}
+
 void M3DViewer::autoaddSupport(QVector3D mpos, int id)
 {
     bool b;
     smd->getTri(tri, id, b);
     smd->getRotateTri(tri);
-    MSupport msp = MSupport(id, supporttype, mpos);
+    MSupport msp = MSupport(id, "free", mpos);
     msp.setBotPos(QVector3D(mpos.x(), mpos.y(), (smd->mmin.z()/smd->getScale().z())), -1);
+    QString bd;
+    getData("mksdlp_toplength", bd, "3");
+    waylen = bd.toDouble();
     msp.setWaylen(waylen);
     msp.setTri(tri, bottri);
     msp.setShape(supportshape);
+    int st;
+    getData("mksdlp_midtype", bd, "0");
+    st = bd.toInt();
+    switch(st){
+    case 0:
+        midsupportshape = "cone";
+        break;
+    case 1:
+        midsupportshape = "cube";
+        break;
+    default:
+        midsupportshape = "cone";
+        break;
+    }
+    msp.setMidSupportShape(midsupportshape);
     msp.setASize(bottsize, middsize);
     msp.setScaled(smd->getScale());
     msp.setOP(smd->getOffset(), smd->getPosition());
@@ -1076,37 +1214,186 @@ void M3DViewer::autoaddSupport(QVector3D mpos, int id)
     QVector3D mr = smd->getRotation();
     mr.setZ(180);
     msp.updatelist(smd->getScale(), smd->getOffset(), mr);
+    while(smd->supportlist.size()>0) {
+        smd->supportlist.erase(smd->supportlist.begin());
+    }
     smd->addSupport(msp);
 }
 
+//添加支撑
 void M3DViewer::appendSupport(bool needrotate)
 {
-//    std::vector<MSupport> smdsuplist;
-//    QVector3D checkpoint;
-//    double checkdistance;
-//    bool canadd = true;
-//    smdsuplist = smd->supportlist;
-//    for(int s = 0; s < smdsuplist.size(); s++)
+     if(smd->hasBase)
+     {
+ //        bottriid = -2;
+         botpoint.setZ(botpoint.z()+smd->getScale().z());
+         supportpoint.setZ(supportpoint.z()+smd->getScale().z());
+         fhead.setZ(fhead.z()+smd->getScale().z());
+         shead.setZ(shead.z()+smd->getScale().z());
+         thead.setZ(thead.z()+smd->getScale().z());
+     }
+    if(bottriid != -1) //判断底部是否有点，从而判断支撑类型1、接触到平台（底部矩形）2、接触到模型（三点支撑）
+    {
+        getUnderPoint(supportpoint, botpoint); //在这个点上的视觉，往下看，获取最先看到的点，判断是否为空，空则加支撑
+        if(bottriid != -1)
+        {
+            int tempid = bottriid;
+            QVector3D lasthead, lastdist, tempbot;
+            float lastZ = botpoint.z();
+            tempbot = botpoint;
+            botpoint.setZ(botpoint.z()+3); //此时botpoint为第一个折点往下的点，底部为三叉型，需要抬高，所以默认为3
+            if(botpoint.z() > supportpoint.z())
+            {
+                triid = -1;
+                return;
+            }
+            lasthead = tempbot;
+            lastdist = QVector3D(0, 0, 0);
+            fdist = QVector3D(-0.1, 0.15, 0);
+            QVector3D temppoint = QVector3D(botpoint.x()+fdist.x(), botpoint.y()+fdist.y(), botpoint.z()); //在底部点向xy轴移动，找寻合适的点（支撑底部三点）
+            getUnderPoint(temppoint, fhead);
+            lasthead = fhead;
+            lastdist = fdist;
+            while(true)
+            {    //fhead此时搜寻的点，x轴负方向，y轴正方向
+                //1、不能比交汇点高，太高就往上了，1为自定义默认范围
+                //2、不能太低，可能会碰到其他无关点，8为自定义默认范围、
+                //3、搜寻的前后点高度不能相差太大，太大可能掉坑了
+                if(bottriid == -1 || fhead.z()>botpoint.z()-1 || fhead.z() < botpoint.z()-8 || lasthead.z()-fhead.z()>2)
+                {
+                    fhead = lasthead;
+                    fdist = lastdist;
+                    break;
+                }
+                if(fdist.x() <= -1 || fdist.y() >= 1.5) //设定搜寻范围
+                {
+                    fhead = lasthead;
+                    fdist = lastdist;
+                    break;
+                }
+                lasthead = fhead;
+                lastdist = fdist;
+                fdist.setX(fdist.x()-0.1);
+                fdist.setY(fdist.y()+0.15);
+                temppoint = QVector3D(botpoint.x()+fdist.x(), botpoint.y()+fdist.y(), botpoint.z());
+                getUnderPoint(temppoint, fhead);
+            }
+            lasthead = tempbot;
+            lastdist = QVector3D(0, 0, 0);
+            sdist = QVector3D(-0.1, -0.2, 0);
+            temppoint = QVector3D(botpoint.x()+sdist.x(), botpoint.y()+sdist.y(), botpoint.z());
+            getUnderPoint(temppoint, shead);
+            while(true)
+            {  //shead此时搜寻的点，x轴负方向，y轴负方向
+                if(bottriid == -1 || shead.z()>botpoint.z()-1 || shead.z() < botpoint.z()-8 || lasthead.z()-shead.z()>2)
+                {
+                    shead = lasthead;
+                    sdist = lastdist;
+                    break;
+                }
+                if(sdist.x() <= -1 || sdist.y() <= -2)
+                {
+                    shead = lasthead;
+                    sdist = lastdist;
+                    break;
+                }
+                lasthead = shead;
+                lastdist = sdist;
+                sdist.setX(sdist.x()-0.1);
+                sdist.setY(sdist.y()-0.2);
+                temppoint = QVector3D(botpoint.x()+sdist.x(), botpoint.y()+sdist.y(), botpoint.z());
+                getUnderPoint(temppoint, shead);
+            }
+            lasthead = tempbot;
+            lastdist = QVector3D(0, 0, 0);
+            tdist = QVector3D(0.15, 0, 0);
+            temppoint = QVector3D(botpoint.x()+tdist.x(), botpoint.y(), botpoint.z());
+            getUnderPoint(temppoint, thead);
+            while(true)
+            {//shead此时搜寻的点，x轴正方向
+                if(bottriid == -1 || thead.z()>botpoint.z()-1 || thead.z() < botpoint.z()-8 || lasthead.z()-thead.z()>2)
+                {
+                    thead = lasthead;
+                    tdist = lastdist;
+                    break;
+                }
+                if(tdist.x() >= 1.5)
+                {
+                    thead = lasthead;
+                    tdist = lastdist;
+                    break;
+                }
+                lasthead = thead;
+                lastdist = tdist;
+                tdist.setX(tdist.x()+0.15);
+                temppoint = QVector3D(botpoint.x()+tdist.x(), botpoint.y(), botpoint.z());
+                getUnderPoint(temppoint, thead);
+            }
+            bottriid = tempid;
+        }
+        paintGL();
+    }
+//    if(bottriid != -1)
 //    {
-//        checkpoint = smdsuplist[s].getBotpoint() - botpoint;
-//        checkdistance = sqrt(pow(checkpoint.x(),2)+pow(checkpoint.y(),2)+pow(checkpoint.z(),2));
-//        if(checkdistance < middsize.x()*2 || supportpoint == smdsuplist[s].getToppoint())
-//        {
-//            return;
-//        }
+//        botpoint.setZ(botpoint.z()+3);
+//        smd->getHead(botpoint, fhead, shead, thead, fdist, sdist, tdist);
 //    }
-    QString isautosize, bsize, msize;
+
+    QString isautosize, bsize, msize, bdepth,toptype,touchtype,toplength,touchtypesize,topwidth,botwidth;
     bool b, m;
+    QString bd;
+    int st;
+//    mparent->setData("mksdlp_supportbsize", "5");
     getData("mksdlp_autosize", isautosize, "1");
-    getData("mksdlp_supportbsize", bsize, "10");
+    getData("mksdlp_supportbsize", bsize, "5");
     getData("mksdlp_supportmsize", msize, "0.5");
+    getData("mksdlp_botdepth", bdepth, "1");//支撑底部高度
+    getData("mksdlp_toptype", toptype, "0"); //支撑顶部形状
+    getData("mksdlp_touchtype", touchtype, "0"); //支撑连接类型
+    getData("mksdlp_touchtypesize", touchtypesize, "0.5"); //支撑连接类型大小
+    getData("mksdlp_toplength", toplength, "3"); //支撑顶部长度
+    getData("mksdlp_topwidth", topwidth, "0.5"); //支撑顶部宽度
+    getData("mksdlp_botwidth", botwidth, "0"); //支撑底部宽度
     bsize.toFloat(&b);
     msize.toFloat(&m);
     if(b&&m)
     {
-        bottsize = QVector3D(bsize.toFloat(), bsize.toFloat(), 0.2);
+        bottsize = QVector3D(botwidth.toFloat(), botwidth.toFloat(), bdepth.toFloat());
         middsize = QVector3D(msize.toFloat(), msize.toFloat(), 0);
     }
+    st = toptype.toFloat();
+    switch(st){
+    case 0:
+        toptype = "cone";
+        break;
+    case 1:
+        toptype = "cube";
+        break;
+    default:
+        toptype = "cone";
+        break;
+    }
+    st = touchtype.toFloat();
+    switch(st){
+    case 0:
+        touchtype = "sphere";
+        break;
+    case 1:
+        touchtype = "none";
+        break;
+    default:
+        touchtype = "none";
+        break;
+    }
+//    if(smd->hasBase)
+//    {
+////        bottriid = -2;
+//        botpoint.setZ(botpoint.z()+smd->getScale().z());
+//        supportpoint.setZ(supportpoint.z()+smd->getScale().z());
+//        fhead.setZ(fhead.z()+smd->getScale().z());
+//        shead.setZ(shead.z()+smd->getScale().z());
+//        thead.setZ(thead.z()+smd->getScale().z());
+//    }
 
 //    getData("mksdlp_supporttype", supporttype, "point");
 //    getData("mksdlp_supportshape", supportshape, "square");
@@ -1114,15 +1401,58 @@ void M3DViewer::appendSupport(bool needrotate)
 //    supportpoint.setY(supportpoint.y()/smd->getScale().y());
 //    botpoint.setX(botpoint.x()/smd->getScale().x());
 //    botpoint.setY(botpoint.y()/smd->getScale().y());
-    MSupport msup = MSupport(triid, supporttype, supportpoint);
+    MSupport msup = MSupport(triid, "free", supportpoint);
 //    msup.setNormal(tri.normal);
+    msup.setCursorPoint(cursorPos3D+smd->getPosition());
     msup.setBotPos(botpoint, bottriid);
+    getData("mksdlp_toplength", bd, "3");
+    waylen = bd.toDouble();
     msup.setWaylen(waylen);
     msup.setTri(tri, bottri);
+    if(smd->hasBase || bottriid >= 0)
+    {
+        msup.setNeedBot(false);
+    }
     msup.setShape(supportshape);
+    msup.setTopSize(toptype,touchtype,toplength.toFloat(),touchtypesize.toFloat(),topwidth.toFloat());
+    getData("mksdlp_midtype", bd, "0");
+    st = bd.toInt();
+    switch(st){
+    case 0:
+        midsupportshape = "cone";
+        break;
+    case 1:
+        midsupportshape = "cube";
+        break;
+    default:
+        midsupportshape = "cone";
+        break;
+    }   
+    msup.setMidSupportShape(midsupportshape); //支撑中部形状
+    getData("mksdlp_supportmidsize", bd, "0.5");
+    msup.setMidWidth( bd.toFloat());
+    getData("mksdlp_bottype", bd, "0");
+    st = bd.toInt();
+    switch(st){
+    case 0:
+        midsupportshape = "cone";
+        break;
+    case 1:
+        midsupportshape = "cube";
+        break;
+    default:
+        midsupportshape = "cone";
+        break;
+    }
+    QString botconesize,botballsize;
+    getData("mksdlp_botconesize", botconesize, "0.5");
+    getData("mksdlp_botballsize", botballsize, "0.5");
+
+    msup.setBotSupportShape(midsupportshape,botwidth.toFloat(),botconesize.toFloat(),botballsize.toFloat()); //支撑底部
     msup.setASize(bottsize, middsize);
     msup.setScaled(smd->getScale());
     msup.setOP(smd->getOffset(), smd->getPosition());
+    msup.setThreePoint(fhead, shead, thead, fdist, sdist, tdist);
     msup.addfinish();
     QVector3D mr = smd->getRotation();
     if(needrotate)
@@ -1159,13 +1489,31 @@ void M3DViewer::wheelEvent(QWheelEvent *event)
 
 void M3DViewer::deleteModel()
 {
-    if(selectid != -1 && currtool == "move")
+    if(selectid != -1)
     {
-        mparent->deleteModel(selectid);
-        selectid = -1;
-        supportfocusid = -1;
-        initPanelData();
-        emit OnModelSelected(selectid);
+        if (currtool == "move") {
+            mparent->deleteModel(selectid);
+            for(unsigned int i = 0; i < redooperalist.size(); i++)
+            {
+                if(i == selectid) {
+                    redooperalist.erase(redooperalist.begin()+i);
+                }
+            }
+            for(unsigned int i = 0; i < operalist.size(); i++)
+            {
+                if(i == selectid) {
+                    operalist.erase(operalist.begin()+i);
+                }
+            }
+            selectid = -1;
+            supportfocusid = -1;
+            initPanelData();
+            emit OnModelSelected(selectid);
+        }else {
+            mparent->showToast(string_finishopera, 2);
+        }
+    }else {
+        showToast(string_selectmodel, 2);
     }
 }
 
@@ -1202,16 +1550,18 @@ void M3DViewer::mouseMoveEvent(QMouseEvent *event)
     mouseDeltaPos.setY(event->y() - mouseLastPos.y());
     if((event->buttons() & Qt::RightButton))
     {
+        //旋转平台
         setXRotation(xRot + 0.5 * mouseDeltaPos.y());
         setZRotation(zRot + 0.5 * mouseDeltaPos.x());
         //were rotating the view so switch view mode!
         currViewAngle = "FREE";
     }else if((event->buttons() & Qt::MiddleButton))
     {
+        //移动视角
         pan += QVector3D(mouseDeltaPos.x()/10.0,mouseDeltaPos.y()/10.0,0);
     }else if((event->buttons() & Qt::LeftButton) && currtool == "move")
     {
-        if(selectid >= 0 && event->x() > 150)
+        if(selectid >= 0 && event->x() > 150) //左侧栏宽度为150
         {
             int z = 0;
             QVector3D p0, p1, p2, p3,cz0, cz1, diff;
@@ -1236,11 +1586,52 @@ void M3DViewer::mouseMoveEvent(QMouseEvent *event)
             initPanelData();
             emit OnModelSelected(selectid);
         }
+    }else if((event->buttons() & Qt::LeftButton) && currtool == "edit"){
+        //编辑支撑
+        if(selectid != -1 && supportfocusid != -1)
+        {
+            updateSupport(event->x(), event->y());
+            cursorPos3D+=smd->getPosition();
+            if(picksupportpart == "top")
+            {
+                smd->supportlist[supportfocusid].setCursorPoint(cursorPos3D);
+                smd->supportlist[supportfocusid].addfinish();
+            }else if(picksupportpart == "mid"){
+                MSupport msup = smd->supportlist[supportfocusid];
+                QVector3D supbotpoint = msup.getBotpoint();
+                QVector3D suptoppoint = msup.getToppoint();
+                int z = 0;
+                QVector3D p0, p1, p2, p3,cz0, cz1, diff;
+                if(cursorPos3D.z() > z)
+                {
+                    z = cursorPos3D.z();
+                }
+                this->getMouseRay(mouseLastPos.x(), mouseLastPos.y(), p0, p1);
+                this->getMouseRay(event->x(), event->y(), p2, p3);
+                p0.setZ(p0.z()-z);
+                p1.setZ(p1.z()-z);
+                p2.setZ(p2.z()-z);
+                p3.setZ(p3.z()-z);
+                cz0 = p0 - (p1 - p0)*(p0.z()/(p1.z()-p0.z()));
+                cz1 = p2 - (p3 - p2)*(p2.z()/(p3.z()-p2.z()));
+                diff = cz1-cz0;
+                smd->supportlist[supportfocusid].supMove(suptoppoint+diff, supbotpoint+diff);
+                smd->supportlist[supportfocusid].addfinish();
+            }else if(picksupportpart != "null"){
+                MSupport msup = smd->supportlist[supportfocusid];
+                QVector3D supbotpoint = msup.getBotpoint();
+                cursorPos3D.setZ(cursorPos3D.z()+msup.getMPos().z());
+                QVector3D tempdist = cursorPos3D-supbotpoint;
+                smd->supportlist[supportfocusid].updateHead(picksupportpart, cursorPos3D, tempdist);
+                smd->supportlist[supportfocusid].addfinish();
+            }
+        }
     }else if(currtool == "add" || currtool == "auto")
     {
+        //添加支撑自动、手动
         if(selectid != -1)
         {
-            getMouseHoverTri(event->x(), event->y());
+            getMouseHoverTri(event->x(), event->y()); //在鼠标移动过程中就去计算当前点向下是否有点
         }
     }else if(currtool == "del")
     {
@@ -1256,6 +1647,38 @@ void M3DViewer::mouseMoveEvent(QMouseEvent *event)
     mouseLastPos = event->pos();
 }
 
+void M3DViewer::updateSupport(float x, float y)
+{
+    supportmod = true;
+    paintGL();
+    glDisable(GL_LIGHTING);
+    float data[3];
+    GLdouble wx, wy, wz;
+    GLint viewport[4];
+    float z = 0;
+    GLdouble mvmatrix[16], projmatrix[16];
+    GLdouble realy;
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    glGetDoublev(GL_MODELVIEW_MATRIX, mvmatrix);
+    glGetDoublev(GL_PROJECTION_MATRIX, projmatrix);
+    realy = viewport[3] - (GLdouble)y;
+    glReadPixels(x, realy, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &z);
+    gluUnProject(x, realy, z, mvmatrix, projmatrix, viewport, &wx, &wy, &wz);
+    glReadPixels(x, realy, 1, 1, GL_RGB, GL_FLOAT, data);
+    triid = round(data[0]*255)+round(data[1]*256*255)+round(data[2]*256*256*255);
+    bool b = false;
+    smd->getTri(tri, triid, b);
+    smd->getRotateTri(tri);
+    cursorPos3D = getPointOnTri(tri, x, y);
+    if(!b)
+    {
+        triid = -1;
+    }
+    supportmod = false;
+    glEnable(GL_LIGHTING);
+    paintGL();
+}
+
 void M3DViewer::update3DPos(float x, float y)
 {
     getObj = true;
@@ -1268,7 +1691,7 @@ void M3DViewer::update3DPos(float x, float y)
     GLdouble wx, wy, wz;
     GLuint index;
     float data[3];
-    glDisable(GL_LIGHTING);
+    glDisable(GL_LIGHTING); //关闭光源（选择模型时需要模型本身的颜色做判断）
     glGetIntegerv(GL_VIEWPORT, viewport);
     glGetDoublev(GL_MODELVIEW_MATRIX, mvmatrix);
     glGetDoublev(GL_PROJECTION_MATRIX, projmatrix);
@@ -1278,7 +1701,7 @@ void M3DViewer::update3DPos(float x, float y)
     gluUnProject(x, realy, z, mvmatrix, projmatrix, viewport, &wx, &wy, &wz);
     glReadPixels(x, realy, 1, 1, GL_STENCIL_INDEX, GL_UNSIGNED_INT, &index);
     glReadPixels(x, realy,1,1, GL_RGB, GL_FLOAT , data);
-    int pickedID =round(data[0]*255)+round(data[1]*256*255)+round(data[2]*256*256*255);
+    int pickedID =round(data[0]*255)+round(data[1]*256*255)+round(data[2]*256*256*255); //根据颜色获取选中的是哪个模型
     if(pickedID+1 > mparent->getModelInstance().size())
     {
         selectid = -1;
@@ -1361,6 +1784,24 @@ void M3DViewer::setMod(QString toolmod)
     {
         autoSupport();
     }
+//    else if (currtool == "add") {
+//        float zoffset = 5;
+//        QString data;
+//        bool b = false;
+//        QVector3D modpos = smd->getPosition();
+//        mparent->getData("mksdlp_supportuplift", data, "5");
+//        data.toFloat(&b);
+//        if(!b)
+//        {
+//            zoffset = 5;
+//        }else{
+//            zoffset = data.toFloat();
+//        }
+//        modpos.setZ(zoffset);
+//        smd->hasuplift = true;
+//    //    DLPlog slog;
+//        smd->setPosition(modpos);
+//    }
 }
 
 void M3DViewer::CancelAdding()
@@ -1372,10 +1813,16 @@ void M3DViewer::CancelAdding()
 
 void M3DViewer::autoSupport()
 {
+    //自动支撑
     if(selectid < 0 || selectid > mparent->getModelInstance().size()-1)
     {
         return;
     }
+    while (smd->supportlist.size()>0) {
+        smd->supportlist.erase(smd->supportlist.begin());
+    }
+
+    bool SupportEveryWhere = false;
 
     CancelAdd = false;
     MDialog *mpd = new MDialog(mparent);
@@ -1399,16 +1846,40 @@ void M3DViewer::autoSupport()
     {
         sprecent = data.toInt();
     }
+    if(sprecent == 50)
+    {
+        sprecent = 70;
+    }
     float xangle = 60;
+    getData("mksdlp_supporttype", data, "0");
+    int st = data.toInt();
+    if(st == 0)
+    {
+        SupportEveryWhere = false;
+    }else{
+        SupportEveryWhere = true;
+    }
     std::vector<triangle> trilist;
     std::vector<triangle> xtrilist;
     std::vector<triangle> samelist;
     QVector3D maxp, minp;
     QVector3D modpos = smd->getPosition();
-    modpos.setZ(zoffset+0.2);
+    mparent->getData("mksdlp_supportuplift", data, "5");
+    data.toFloat(&b);
+    if(!b)
+    {
+        zoffset = 5;
+    }else{
+        zoffset = data.toFloat();
+    }
+    modpos.setZ(zoffset);
+    smd->hasuplift = true;
 //    DLPlog slog;
     smd->setPosition(modpos);
 //    slog._log("message:", "prepare :"+QString::number(trilist.size()));
+    QString bd;
+    getData("mksdlp_toplength", bd, "3");
+    waylen = bd.toDouble();
     smd->getStri(xangle, trilist, waylen, maxp, minp, mpd);
 //    slog._log("message:", "finish :"+QString::number(trilist.size()));
     float xlen, ylen;
@@ -1416,10 +1887,11 @@ void M3DViewer::autoSupport()
     ylen = maxp.y()-minp.y();
     float yoffset = ylen/((ylen/2)*sprecent/100);
     float xoffset = 2;
-    std::sort(trilist.begin(), trilist.end(), bssy);
+//    std::sort(trilist.begin(), trilist.end(), bssy);
+//    qSort(trilist.begin(), trilist.end(), bssy);
     int minpos = 0;
     int minpox = 0;
-    float maxx, minx;
+    float maxx = 0, minx = 0;
     int progress = 0;
     triangle tri, picktri;
 //    slog._log("message:", QString::number(trilist.size()));
@@ -1443,7 +1915,7 @@ void M3DViewer::autoSupport()
             }
             if(tri.vertex[0].y() < my && tri.vertex[1].y() < my && tri.vertex[2].y() < my)
             {
-                minpos = mp;
+//                minpos = mp;
             }else{
                 if(mp == minpos)
                 {
@@ -1467,7 +1939,8 @@ void M3DViewer::autoSupport()
         minpox = 0;
         xlen = maxx - minx;
         xoffset = xlen/((xlen/2)*sprecent/100);
-        std::sort(xtrilist.begin(), xtrilist.end(), bssx);
+//        std::sort(xtrilist.begin(), xtrilist.end(), bssx);
+//        qSort(xtrilist.begin(), xtrilist.end(), bssx);
         float mz =0;
         for(float mx=minx; mx<maxx; mx=xoffset+mx)
         {
@@ -1483,7 +1956,7 @@ void M3DViewer::autoSupport()
                 }
                 if(tri.vertex[0].x() < mx && tri.vertex[1].x() < mx && tri.vertex[2].x() < mx)
                 {
-                    minpox = j;
+//                    minpox = j;
                 }
                 bool b = smd->PointinTri(tri, QVector3D(mx, my, 0));
                 if(b)
@@ -1504,45 +1977,112 @@ void M3DViewer::autoSupport()
                     }
                 }
             }
-            if(foundpicktri)
+            if(!SupportEveryWhere)
             {
-                if(minp.z() < picktri.minp.z())
+                if(foundpicktri)
                 {
-                    smd->getZonXY(picktri, mx, my, mz);
-                    if(!smd->supportlastcheck(mx, my, mz))
+                    if(minp.z() < picktri.minp.z())
                     {
-                        continue;
+                        smd->getZonXY(picktri, mx, my, mz);
+                        if(!smd->supportlastcheck(mx, my, mz))
+                        {
+                            continue;
+                        }
                     }
+                    triid = picktri.id;
+                    bool b;
+                    supporttype = "free";
+                    float z;
+                    smd->getTri(this->tri, triid, b);
+                    smd->getRotateTri(this->tri);
+                    for(int tritransid=0; tritransid<3; tritransid++)
+                    {
+                        this->tri->vertex[tritransid].setX(picktri.vertex[tritransid].x());
+                        this->tri->vertex[tritransid].setY(picktri.vertex[tritransid].y());
+                        this->tri->vertex[tritransid].setZ(picktri.vertex[tritransid].z());
+                    }
+    //                QVector3D mnormal = smd->getNormal(picktri);
+                    this->tri->normal = picktri.normal;
+                    this->tri->normal.normalize();
+                    bottriid = -1;
+                    smd->getZonXY(picktri, mx, my, z);
+    //                mx = mx/smd->getScale().x();
+    //                my = my/smd->getScale().y();
+                    supportpoint = QVector3D(mx, my, z+(smd->mmin.z())-modpos.z());
+                    cursorPos3D = supportpoint-modpos;
+                    double dlen;
+                    dlen = sqrt(pow(picktri.normal.x(),2)+pow(picktri.normal.y(),2)+pow(picktri.normal.z(),2));
+                    dscale = waylen/dlen;
+                    cursorPos3D -= picktri.normal*dscale;
+//                    getUnderPoint(supportpoint, botpoint);
+                    botpoint = QVector3D(supportpoint.x(), supportpoint.y(), (smd->mmin.z()));
+                    if(sprecent == 70)
+                    {
+                        bottsize = QVector3D(5, 5, 1);
+                    }else{
+                        bottsize = QVector3D(10, 10, 1);
+                    }
+                    middsize = QVector3D(0.5, 0.5, 0);
+                    bottriid = -1;
+                    appendSupport();
+                    paintGL();
                 }
-                triid = picktri.id;
-                bool b;
-                supporttype = "free";
-                float z;
-                smd->getTri(this->tri, triid, b);
-                smd->getRotateTri(this->tri);
-                for(int tritransid=0; tritransid<3; tritransid++)
+            }else{
+                for(int triv=0; triv<samelist.size(); triv++)
                 {
-                    this->tri->vertex[tritransid].setX(picktri.vertex[tritransid].x());
-                    this->tri->vertex[tritransid].setY(picktri.vertex[tritransid].y());
-                    this->tri->vertex[tritransid].setZ(picktri.vertex[tritransid].z());
+                    picktri = samelist[triv];
+                    triid = picktri.id;
+                    smd->getTri(this->tri, triid, b);
+                    smd->getRotateTri(this->tri);
+                    for(int tritransid=0; tritransid<3; tritransid++)
+                    {
+                        this->tri->vertex[tritransid].setX(picktri.vertex[tritransid].x());
+                        this->tri->vertex[tritransid].setY(picktri.vertex[tritransid].y());
+                        this->tri->vertex[tritransid].setZ(picktri.vertex[tritransid].z());
+                    }
+                    this->tri->normal = picktri.normal;
+                    this->tri->normal.normalize();
+                    bottriid = -1;
+                    float z;
+                    smd->getZonXY(picktri, mx, my, z);
+                    supportpoint = QVector3D(mx, my, z+(smd->mmin.z())-modpos.z());
+                    cursorPos3D = supportpoint-modpos;
+                    double dlen;
+                    dlen = sqrt(pow(picktri.normal.x(),2)+pow(picktri.normal.y(),2)+pow(picktri.normal.z(),2));
+                    dscale = waylen/dlen;
+                    cursorPos3D -= picktri.normal*dscale;
+                    dlen = sqrt(pow(this->tri->normal.x(),2)+pow(this->tri->normal.y(),2)+pow(this->tri->normal.z(),2));
+                    dscale = waylen/dlen;
+                    QVector3D tempway = picktri.normal*dscale, supdist = QVector3D(0, 0, 0);
+                    QVector3D targetdist = this->tri->normal*dscale, tempdist = QVector3D(10, 10, 10);
+                    QVector3D tsupportpoint  = supportpoint-targetdist;
+                    getUnderPoint(supportpoint, botpoint);
+                    if(bottriid != -1)
+                    {
+                        for(int distv=1; distv<11; distv++)
+                        {
+                            tsupportpoint += targetdist/10;
+                            getUnderPoint(tsupportpoint, botpoint);
+                            if(qAbs(botpoint.z()-tsupportpoint.z()) < 1)
+                            {
+                                break;
+                            }
+                        }
+                        if(qAbs(botpoint.z()-tsupportpoint.z()) < 1)
+                        {
+                            continue;
+                        }
+                    }
+                    if(sprecent == 70)
+                    {
+                        bottsize = QVector3D(5, 5, 1);
+                    }else{
+                        bottsize = QVector3D(10, 10, 1);
+                    }
+                    middsize = QVector3D(0.5, 0.5, 0);
+                    appendSupport();
                 }
-//                QVector3D mnormal = smd->getNormal(picktri);
-                this->tri->normal = picktri.normal;
-                this->tri->normal.normalize();
-                bottriid = -1;
-                smd->getZonXY(picktri, mx, my, z);
-//                mx = mx/smd->getScale().x();
-//                my = my/smd->getScale().y();
-//                qDebug() << "getZonXY" << picktri.vertex[0] << picktri.vertex[1] << picktri.vertex[2] << z;
-                supportpoint = QVector3D(mx, my, z+(smd->mmin.z()/smd->getScale().z())-5);
-//                double dlen;
-//                dlen = sqrt(pow(picktri.normal.x(),2)+pow(picktri.normal.y(),2)+pow(picktri.normal.z(),2));
-//                dscale = waylen/dlen;
-//                supportpoint += tri.normal*dscale;
-                botpoint = QVector3D(supportpoint.x(), supportpoint.y(), (smd->mmin.z()/smd->getScale().z()));
-                bottsize = QVector3D(10, 10, 0.2);
-                middsize = QVector3D(0.5, 0.5, 0);
-                appendSupport();
+                paintGL();
             }
         }
 //        if(smd->supportlist.size()>0)
@@ -1550,11 +2090,10 @@ void M3DViewer::autoSupport()
 //            break;
 //        }
     }
-//    qDebug() << "__________________________________________________________";
     initPanelData();
-    modpos = smd->getPosition();
-    modpos.setZ((zoffset+0.2)*smd->getScale().z());
-    smd->setPosition(modpos);
+//    modpos = smd->getPosition();
+//    modpos.setZ((zoffset+0.2)*smd->getScale().z());
+//    smd->setPosition(modpos);
     mpd->close();
 
 
@@ -1636,7 +2175,6 @@ void M3DViewer::autoSupport()
 
 void M3DViewer::autoSupportFinish()
 {
-    qDebug() << smd->supportlist.size();
 //    for(int i=0; i<smd->supportlist.size(); i++)
 //    {
 //        MSupport msup = smd->supportlist[i];
@@ -1688,6 +2226,7 @@ void M3DViewer::getBottomPoint()
 
 void M3DViewer::getMouseHoverTri(int x, int y)
 {
+    //鼠标移动所指三角面
     supportmod = true;
     paintGL();
     glDisable(GL_LIGHTING);
@@ -1704,7 +2243,7 @@ void M3DViewer::getMouseHoverTri(int x, int y)
     glReadPixels(x, realy, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &z);
     gluUnProject(x, realy, z, mvmatrix, projmatrix, viewport, &wx, &wy, &wz);
     glReadPixels(x, realy, 1, 1, GL_RGB, GL_FLOAT, data);
-    triid = round(data[0]*255)+round(data[1]*256*255)+round(data[2]*256*256*255);
+    triid = round(data[0]*255)+round(data[1]*256*255)+round(data[2]*256*256*255); //所指三角面ID
     bool b = false;
     smd->getTri(tri, triid, b);
     smd->getRotateTri(tri);
@@ -1714,14 +2253,14 @@ void M3DViewer::getMouseHoverTri(int x, int y)
 //    mtri.vertex[1] = tri->vertex[1];
 //    mtri.vertex[2] = tri->vertex[2];
 //    mtri.normal.normalized();
-    cursorPos3D = getPointOnTri(tri, x, y);
+    cursorPos3D = getPointOnTri(tri, x, y); //获取鼠标的向量位置
+//    qDebug() << "获取鼠标的向量位置cursorPos3D" << cursorPos3D;
 //    smd->getZonXY(mtri, (float)cursorPos3D.x(), (float)cursorPos3D.y(), z);
-//    qDebug() << "cursorPos3D:" << cursorPos3D.z() << " calculate z:" << z;
     if(!b)
-    {
+    {//底部贴着平台网格的点
         triid = -1;
         botpoint = supportpoint;
-    }else if(tri->normal.z() < 0)
+    }else if(tri->normal.z() < 0) //tri向量，tri->normal.z() < 0表明三角面朝下可以加支撑，tri->normal.z() > 0面朝上不加
     {
         rePaintModel();
     }
@@ -1765,7 +2304,7 @@ QVector3D M3DViewer::getPointOnTri(triangle *bottri, int x, int y)
     QVector3D mscale = smd->getScale();
     glPushMatrix();
     glTranslatef(-mpos.x(), -mpos.y(), mpos.z()+smd->getOffset().z());
-    glScalef(mscale.x(), mscale.y(), mscale.z());
+//    glScalef(mscale.x(), mscale.y(), mscale.z());
     glBegin(GL_TRIANGLES);// Drawing Using Triangles
     glNormal3f( bottri->normal.x(),bottri->normal.y(),bottri->normal.z());//normals
 
@@ -1799,17 +2338,9 @@ QVector3D M3DViewer::getPointOnTri(triangle *bottri, int x, int y)
 
 void M3DViewer::rePaintModel()
 {
-    const float viewRad = 1.0;
-    const float nearPlane = 0;
+    haveturn = false;
     QVector3D moffset, mpos, msize;
-    double dlen;
-    dlen = sqrt(pow(tri->normal.x(),2)+pow(tri->normal.y(),2)+pow(tri->normal.z(),2));
-    dscale = waylen/dlen;
-    moffset = smd->getOffset();
     mpos = smd->getPosition();
-    msize = smd->getSize();
-    float data[3];
-    bool b = false;
     bottsize = QVector3D(10, 10, 0.1);
     middsize = QVector3D(0.5, 0.5, 0);
     if(supporttype == "point")
@@ -1823,24 +2354,65 @@ void M3DViewer::rePaintModel()
         supportpoint = supportpoint + tri->normal*dscale/3;
         supportpoint.setZ(minp.z()-0.1);
     }else if(supporttype == "free")
-    {
-        supportpoint = QVector3D(cursorPos3D.x()+mpos.x(), cursorPos3D.y()+mpos.y(), cursorPos3D.z() + mpos.z());
-        supportpoint += tri->normal*dscale;
+    {//现在只有这种模式
+        supportpoint = QVector3D(cursorPos3D.x()+mpos.x(), cursorPos3D.y()+mpos.y(), cursorPos3D.z() + mpos.z()); //获取所指模型的点，计算与原模型（初始化模型时保存的数据移动缩放也不改变）的偏移量
+        QVector3D sp = supportpoint;
+        supportpoint += tri->normal*dscale; //通过向量的方向延长获取支撑的第一个折点
+//        qDebug() << "sp" << sp;
+//        qDebug() << "supportpoint" << supportpoint;
     }
+    getUnderPoint(supportpoint, botpoint);
+}
+
+ //在这个点上的视觉，往下看，获取最先看到的点
+void M3DViewer::getUnderPoint(QVector3D mpoint, QVector3D &underpoint)
+{
+    QVector3D moffset, mpos, msize, tempnormal, tempdistance, temppoint;
+//    tempnormal = supportpoint-mpoint;
+//    tempnormal.setZ(-mpoint.z()+botpoint.z());
+//    tempdistance = tempnormal;
+//    float lens = sqrt(pow(tempnormal.x(), 2)+pow(tempnormal.y(), 2)+pow(tempnormal.z(), 2));
+//    if(lens != 0)
+//    {
+//        tempnormal = QVector3D(tempnormal.x()/lens, tempnormal.y()/lens, tempnormal.z()/lens);
+//    }
+//    float distance = sqrt(pow(tempdistance.x(),2)+pow(tempdistance.y(),2)+pow(tempdistance.z(),2));
+//    float xangle = qAcos(tempnormal.z()/distance)*(180/M_PI);
+//    float zangle = qAtan2(tempnormal.y()*0.3, tempnormal.x()*0.3)*(180/M_PI)-90;
+//    if(zangle <= 90)
+//    {
+//        zangle += 180;
+//    }
+//    rotatPoint(temppoint, -xangle, QVector3D(0, 1, 0));
+//    qDebug() << tempnormal << tempdistance << xangle << zangle;
+    double dlen;
+    dlen = sqrt(pow(tri->normal.x(),2)+pow(tri->normal.y(),2)+pow(tri->normal.z(),2));
+    QString bd;
+    getData("mksdlp_toplength", bd, "3");
+    waylen = bd.toDouble();
+    dscale = waylen/dlen;
+    moffset = smd->getOffset();
+    mpos = smd->getPosition();
+    msize = smd->getSize();
+    float data[3];
+    bool b = false;
+    const float viewRad = 0.1;
+    const float nearPlane = 0;
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    glOrtho(supportpoint.x() - viewRad,
-            supportpoint.x() + viewRad,
-            supportpoint.y() - viewRad,
-            supportpoint.y() + viewRad,
+    glOrtho(mpoint.x() - viewRad,
+            mpoint.x() + viewRad,
+            mpoint.y() - viewRad,
+            mpoint.y() + viewRad,
             nearPlane,
-            msize.z());
+            msize.z()+mpos.z()+smd->getScale().z());
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
     glPushMatrix();
     QVector3D mrotation, mscale;
     mrotation = smd->getRotation();
-    glTranslated(0.0f, 0.0f, -supportpoint.z());
+    mscale = smd->getScale();
+    glTranslated(0.0f, 0.0f, -mpoint.z());
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glDisable(GL_LIGHTING);
     std::vector<unsigned int> nlist;
@@ -1848,6 +2420,7 @@ void M3DViewer::rePaintModel()
     glRotatef(mrotation.z(), 0.0, 0.0, 1.0);
     glRotatef(mrotation.x(), 1.0, 0.0, 0.0);
     glRotatef(mrotation.y(), 0.0, 1.0, 0.0);
+    glScalef(mscale.x(), mscale.y(), mscale.z());
     for(unsigned int j = 0; j < nlist.size(); j++)
     {
         glCallList(nlist[j]);
@@ -1864,10 +2437,19 @@ void M3DViewer::rePaintModel()
     if(!b)
     {
         bottriid = -1;
-        botpoint = supportpoint;
-        botpoint.setZ((smd->mmin.z()/smd->getScale().z()));
+        underpoint = supportpoint;
+        underpoint.setZ((smd->mmin.z()));
     }else{
-        botpoint = getPointTri(bottri);
+//        underpoint = getPointTri(bottri);
+        float z = 0, x = mpoint.x(), y=mpoint.y();
+        underpoint = mpoint;
+        triangle bt;
+        bt.normal = bottri->normal;
+        bt.vertex[0] = bottri->vertex[0];
+        bt.vertex[1] = bottri->vertex[1];
+        bt.vertex[2] = bottri->vertex[2];
+        smd->getZonXY(bt, x, y, z);
+        underpoint.setZ(z);
         b = false;
     }
     glEnable(GL_LIGHTING);
@@ -1893,16 +2475,16 @@ void M3DViewer::rePaintSupport(int x, int y)
     g = 131;
     b = 87;
     glDisable(GL_LIGHTING);
-    glTranslatef(-mpos.x(), -mpos.y(), mpos.z()+moffset.z());
-    glScalef(mscale.x(), mscale.y(), mscale.z());
+    glTranslatef(-mpos.x(), -mpos.y(), mpos.z());
+//    glScalef(mscale.x(), mscale.y(), mscale.z());
     glRotatef(mrotation.z(), 0.0, 0.0, 1.0);
     glRotatef(mrotation.x(), 1.0, 0.0, 0.0);
     glRotatef(mrotation.y(), 0.0, 1.0, 0.0);
     glColor3f(r/255.0f, g/255.0f, b/255.0f);
-    for(unsigned int j = 0; j < nlist.size(); j++)
-    {
-        glCallList(nlist[j]);
-    }
+//    for(unsigned int j = 0; j < nlist.size(); j++)
+//    {
+//        glCallList(nlist[j]);
+//    }
     glRotatef(-mrotation.y(), 0.0, 1.0, 0.0);
     glRotatef(-mrotation.x(), 1.0, 0.0, 0.0);
     glRotatef(-mrotation.z(), 0.0, 0.0, 1.0);
@@ -1930,10 +2512,16 @@ void M3DViewer::rePaintSupport(int x, int y)
     glGetDoublev(GL_PROJECTION_MATRIX, projmatrix);
     realy = viewport[3] - (GLdouble)y;
     glReadPixels(x, realy, 1, 1, GL_RGB, GL_FLOAT, data);
+    glReadPixels(x, realy, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &z);
+    gluUnProject(x, realy, z, mvmatrix, projmatrix, viewport, &wx, &wy, &wz);
     int supportid = round(data[0]*255)+round(data[1]*256*255)+round(data[2]*256*256*255);
     if(supportid > -1 && supportid <smd->supportlist.size())
     {
         supportfocusid = supportid;
+        picksupportpart = smd->supportlist[supportid].getPickPart(QVector3D(wx+smd->getPosition().x(),
+                                                                            wy+smd->getPosition().y(),
+                                                                            wz+(smd->mmin.z())-smd->getPosition().z()));
+//        qDebug() << "picksupportpart" << picksupportpart ;
     }else{
         supportfocusid = -1;
     }
@@ -2034,6 +2622,10 @@ QVector3D M3DViewer::getPointTri(triangle* bottri)
 void M3DViewer::mouseReleaseEvent(QMouseEvent *event)
 {
     mouseLastPos = event->pos();
+    if(currtool == "edit")
+    {
+        supportfocusid = -1;
+    }
 }
 
 
@@ -2091,7 +2683,7 @@ void M3DViewer::drawModelInstance()
 {
     std::vector<unsigned int> nlist;
     std::vector<MSupport> suplist;
-    QVector3D moffset, mscale, mrotation;
+    QVector3D moffset, mscale, mrotation, mbasesize, basescale;
     QVector3D mpos, msize;
     glEnable(GL_DEPTH_TEST);
     int r, g, b;
@@ -2127,6 +2719,27 @@ void M3DViewer::drawModelInstance()
         mpos = mparent->getModelInstance()[i]->getPosition();
         suplist = mparent->getModelInstance()[i]->supportlist;
         msize = mparent->getModelInstance()[i]->getSize();
+        mbasesize = mparent->getModelInstance()[i]->mbasesize;
+        float maxbase = msize.x();
+        if(msize.y() > maxbase)
+        {
+            maxbase = msize.y();
+        }
+        maxbase = maxbase+maxbase*0.3;
+        QString data;
+        float size;
+        bool b = false;
+        mparent->getData("mksdlp_basesize", data, "5");
+        data.toFloat(&b);
+        if(!b)
+        {
+            size = 5;
+        }else{
+            size = data.toFloat();
+            if (size > maxbase) {
+                maxbase = size;
+            }
+        }
         if(selectid == i && currtool == "copy")
         {
             glEnable(GL_LIGHTING);
@@ -2154,22 +2767,32 @@ void M3DViewer::drawModelInstance()
         glEnable(GL_CLIP_PLANE2);
         glEnable(GL_CLIP_PLANE3);
         glEnable(GL_CLIP_PLANE4);
+        //模型未选中颜色
         r = 136;
         g = 131;
         b = 87;
         if(selectid == i || takeScreenShot)
         {
+            //模型选中颜色
             r = 221;
             g = 205;
             b = 74;
         }
         if(getObj)
         {
+            //每个模型在点击的瞬间改变颜色，用来辨别点击了哪个模型
             r = (i & 0x000000FF) >>  0;
             g = (i & 0x0000FF00) >>  8;
             b = (i & 0x00FF0000) >> 16;
         }
-        glTranslatef(-mpos.x(), -mpos.y(), mpos.z()+moffset.z());
+//         qDebug() << "drawModelInstance hasBase" << mparent->getModelInstance()[i]->hasBase;
+//          qDebug() << "drawModelInstance" << mscale.z();
+//        if(mparent->getModelInstance()[i]->hasBase)
+//        {
+//            glTranslatef(-mpos.x(), -mpos.y(), mpos.z()+moffset.z()+mscale.z());
+//        }else{
+            glTranslatef(-mpos.x(), -mpos.y(), mpos.z()+moffset.z());
+//        }
         glScalef(mscale.x(), mscale.y(), mscale.z());
         glRotatef(mrotation.z(), 0.0, 0.0, 1.0);
         glRotatef(mrotation.x(), 1.0, 0.0, 0.0);
@@ -2189,27 +2812,42 @@ void M3DViewer::drawModelInstance()
             {
                 glCallList(nlist[j]);
             }
-            glPopMatrix();
-            glPushMatrix();
-            glTranslatef(-mpos.x(), -mpos.y(), mpos.z()+moffset.z());
-            glScalef(mscale.x(), mscale.y(), mscale.z());
-            for(int supnum = 0; supnum < suplist.size(); supnum++)
+            if(mparent->getModelInstance()[i]->hasBase)
             {
-                if(supportfocusid != -1 && supnum == supportfocusid && selectid == i)
-                {
-                    r = 255;
-                    b = 0;
-                    g = 0;
-                }else{
-                    r = 107;
-                    g = 97;
-                    b = 11;
-                }
-                glColor3f(r/255.0f, g/255.0f, b/255.0f);
-                nlist = suplist[supnum].normDispLists;
-                for(unsigned int j = 0; j < nlist.size(); j++)
+                glPopMatrix();
+                glPushMatrix();
+                glTranslatef(-mpos.x(), -mpos.y(), 1*mscale.z()/2);
+                glScalef(maxbase/mbasesize.x(), maxbase/mbasesize.y(), mscale.z());
+                nlist = mparent->getModelInstance()[i]->basenormDispLists;
+                for(unsigned int j=0; j<nlist.size(); j++)
                 {
                     glCallList(nlist[j]);
+                }
+            }
+            glPopMatrix();
+            glPushMatrix();
+            glTranslatef(-mpos.x(), -mpos.y(), mpos.z());
+//            glScalef(mscale.x(), mscale.y(), mscale.z());
+            if(!getObj)
+            {
+                for(int supnum = 0; supnum < suplist.size(); supnum++)
+                {
+                    if(supportfocusid != -1 && supnum == supportfocusid && selectid == i)
+                    {
+                        r = 255;
+                        b = 0;
+                        g = 0;
+                    }else{
+                        r = 107;
+                        g = 97;
+                        b = 11;
+                    }
+                    glColor3f(r/255.0f, g/255.0f, b/255.0f);
+                    nlist = suplist[supnum].normDispLists;
+                    for(unsigned int j = 0; j < nlist.size(); j++)
+                    {
+                        glCallList(nlist[j]);
+                    }
                 }
             }
             if(!getObj){
@@ -2235,6 +2873,18 @@ void M3DViewer::drawModelInstance()
                     {
                         glCallList(nlist[j]);
                     }
+                    if(mparent->getModelInstance()[i]->hasBase)
+                    {
+                        glPopMatrix();
+                        glPushMatrix();
+                        glTranslatef(-mpos.x(), -mpos.y(), mpos.z()+1*mscale.z());
+                        glScalef(maxbase/mbasesize.x(), maxbase/mbasesize.y(), mscale.z());
+                        nlist = mparent->getModelInstance()[i]->basenormDispLists;
+                        for(unsigned int j=0; j<nlist.size(); j++)
+                        {
+                            glCallList(nlist[j]);
+                        }
+                    }
                 }
                 if(mpos.x()-msize.x()/2 < -buildsizex/2){
                     glPopMatrix();
@@ -2254,6 +2904,18 @@ void M3DViewer::drawModelInstance()
                     for(unsigned int j = 0; j < nlist.size(); j++)
                     {
                         glCallList(nlist[j]);
+                    }
+                    if(mparent->getModelInstance()[i]->hasBase)
+                    {
+                        glPopMatrix();
+                        glPushMatrix();
+                        glTranslatef(-mpos.x(), -mpos.y(), mpos.z()+1*mscale.z());
+                        glScalef(maxbase/mbasesize.x(), maxbase/mbasesize.y(), mscale.z());
+                        nlist = mparent->getModelInstance()[i]->basenormDispLists;
+                        for(unsigned int j=0; j<nlist.size(); j++)
+                        {
+                            glCallList(nlist[j]);
+                        }
                     }
                 }
                 if(mpos.y()+msize.y()/2 > buildsizey/2){
@@ -2275,6 +2937,18 @@ void M3DViewer::drawModelInstance()
                     {
                         glCallList(nlist[j]);
                     }
+                    if(mparent->getModelInstance()[i]->hasBase)
+                    {
+                        glPopMatrix();
+                        glPushMatrix();
+                        glTranslatef(-mpos.x(), -mpos.y(), mpos.z()+1*mscale.z());
+                        glScalef(maxbase/mbasesize.x(), maxbase/mbasesize.y(), mscale.z());
+                        nlist = mparent->getModelInstance()[i]->basenormDispLists;
+                        for(unsigned int j=0; j<nlist.size(); j++)
+                        {
+                            glCallList(nlist[j]);
+                        }
+                    }
                 }
                 if(mpos.y()-msize.y()/2 < -buildsizey/2){
                     glPopMatrix();
@@ -2294,6 +2968,18 @@ void M3DViewer::drawModelInstance()
                     for(unsigned int j = 0; j < nlist.size(); j++)
                     {
                         glCallList(nlist[j]);
+                    }
+                    if(mparent->getModelInstance()[i]->hasBase)
+                    {
+                        glPopMatrix();
+                        glPushMatrix();
+                        glTranslatef(-mpos.x(), -mpos.y(), mpos.z()+1*mscale.z());
+                        glScalef(maxbase/mbasesize.x(), maxbase/mbasesize.y(), mscale.z());
+                        nlist = mparent->getModelInstance()[i]->basenormDispLists;
+                        for(unsigned int j=0; j<nlist.size(); j++)
+                        {
+                            glCallList(nlist[j]);
+                        }
                     }
                 }
                 if(mpos.z()+msize.z() > buildsizez){
@@ -2315,9 +3001,21 @@ void M3DViewer::drawModelInstance()
                     {
                         glCallList(nlist[j]);
                     }
+                    if(mparent->getModelInstance()[i]->hasBase)
+                    {
+                        glPopMatrix();
+                        glPushMatrix();
+                        glTranslatef(-mpos.x(), -mpos.y(), mpos.z()+1*mscale.z());
+                        glScalef(maxbase/mbasesize.x(), maxbase/mbasesize.y(), mscale.z());
+                        nlist = mparent->getModelInstance()[i]->basenormDispLists;
+                        for(unsigned int j=0; j<nlist.size(); j++)
+                        {
+                            glCallList(nlist[j]);
+                        }
+                    }
                 }
             }
-            if(triid != -1 && !supportmod && selectid == i && currtool != "move")
+            if(triid != -1 && !supportmod && selectid == i && currtool != "move" && currtool != "edit")
             {
                 glPopMatrix();
                 glPushMatrix();
@@ -2359,20 +3057,20 @@ void M3DViewer::drawModelInstance()
                     glEnable(GL_LIGHTING);
                 }else if(supporttype == "free")
                 {
-                    glScalef(mscale.x(), mscale.y(), mscale.z());
+//                    glScalef(mscale.x(), mscale.y(), mscale.z());
                     glDisable(GL_LIGHTING);
                     glBegin(GL_LINES);
                     glVertex3f(cursorPos3D.x()+mpos.x(), cursorPos3D.y()+mpos.y(), cursorPos3D.z()+mpos.z());
                     glVertex3f(cursorPos3D.x() + mpos.x() + tri->normal.x(),
                                cursorPos3D.y() + mpos.y() + tri->normal.y(),
                                cursorPos3D.z() + mpos.z() + tri->normal.z());
-                    if(tri->normal.z() < 0)
-                    {
-                        glVertex3f(cursorPos3D.x() + mpos.x() + tri->normal.x(),
-                                    cursorPos3D.y() + mpos.y() + tri->normal.y(),
-                                    cursorPos3D.z() + mpos.z() + tri->normal.z());
-                        glVertex3f(botpoint.x(), botpoint.y(), botpoint.z());
-                    }
+//                    if(tri->normal.z() < 0)
+//                    {
+//                        glVertex3f(cursorPos3D.x() + mpos.x() + tri->normal.x(),
+//                                    cursorPos3D.y() + mpos.y() + tri->normal.y(),
+//                                    cursorPos3D.z() + mpos.z() + tri->normal.z());
+//                        glVertex3f(botpoint.x(), botpoint.y(), botpoint.z());
+//                    }
                     glEnd();
                     glEnable(GL_LIGHTING);
                 }
@@ -2391,6 +3089,144 @@ void M3DViewer::drawModelInstance()
         glDisable(GL_CLIP_PLANE3);
         glDisable(GL_CLIP_PLANE4);
         glPopMatrix();
+    }
+}
+void M3DViewer::saveOperaData(int id, QVector3D  mscale, QVector3D mrotation, QVector3D mpos) {
+    if (saveopera) {
+        operaData *od = new operaData();
+        od->id = id;
+        od->scale = mscale;
+        od->position = mpos;
+        od->rotation = mrotation;
+        if (operalist.size() >= 5) {
+            operalist.erase(operalist.begin());
+        }
+//        while (operalist.size() > 0 && currentoperaindex != operalist.size() - 1) {
+//            operalist.erase(operalist.end());
+//        }
+        operalist.push_back(od);
+//        currentoperaindex = operalist.size();
+        while(redooperalist.size() > 0) {
+            redooperalist.erase(redooperalist.begin());
+        }
+    }
+}
+
+void M3DViewer:: redoModel() {
+     if(!rotatepanel->isHidden() || !scaledpanel->isHidden() || !positionpanel->isHidden()) {
+         rotatepanel->hide();
+         scaledpanel->hide();
+         positionpanel->hide();
+     }
+    saveopera = false;
+//    qDebug() << "redoModel redooperalist" << redooperalist.size();
+    for(unsigned int i = 0; i < redooperalist.size(); i++)
+    {
+//        qDebug() << i << redooperalist[i]->rotation;
+    }
+    if (redooperalist.size() < 0) {
+        return;
+    }
+    if (redooperalist.size() > 0 && redooperalist.size() - originlen > 0) {
+        int index = redooperalist.size() - 1;
+        for(unsigned int i = 0; i < mparent->getModelInstance().size(); i++)
+        {
+           if (i == redooperalist[index]->id) {
+               mparent->getModelInstance()[i]->setScale(redooperalist[index]->scale);
+               mparent->getModelInstance()[i]->setRotation(redooperalist[index]->rotation);
+               mparent->getModelInstance()[i]->setPosition(redooperalist[index]->position);
+               mThread->initUpdateThread(mparent->getModelInstance()[i]);
+               mThread->start();
+           }
+        }
+        operalist.push_back(redooperalist[index]);
+        redooperalist.pop_back();
+    } else if (redooperalist.size() - originlen == 0){
+        for(unsigned int j = 0; j < redooperalist.size(); j++) {
+            for(unsigned int i = 0; i < mparent->getModelInstance().size(); i++)
+            {
+               if (i == redooperalist[j]->id) {
+                   mparent->getModelInstance()[i]->setScale(redooperalist[j]->scale);
+                   mparent->getModelInstance()[i]->setRotation(redooperalist[j]->rotation);
+                   mparent->getModelInstance()[i]->setPosition(redooperalist[j]->position);
+                   mThread->initUpdateThread(mparent->getModelInstance()[i]);
+                   mThread->start();
+               }
+            }
+        }
+    }
+//    if (currentoperaindex < operalist.size() - 1) {
+//        currentoperaindex += 1;
+//        qDebug() << "redoModel currentoperaindex" << currentoperaindex;
+//        for(unsigned int i = 0; i < mparent->getModelInstance().size(); i++)
+//        {
+//           if (i == operalist[currentoperaindex]->id) {
+//               mparent->getModelInstance()[i]->setScale(operalist[currentoperaindex]->scale);
+//               mparent->getModelInstance()[i]->setRotation(operalist[currentoperaindex]->rotation);
+//               mparent->getModelInstance()[i]->setPosition(operalist[currentoperaindex]->position);
+//               mThread->initUpdateThread(mparent->getModelInstance()[i]);
+//               mThread->start();
+//           }
+//        }
+//    }
+}
+
+void M3DViewer:: undoModel() {
+    if(!rotatepanel->isHidden() || !scaledpanel->isHidden() || !positionpanel->isHidden()) {
+        rotatepanel->hide();
+        scaledpanel->hide();
+        positionpanel->hide();
+    }
+    saveopera = false;
+    //    if (currentoperaindex > 0) {
+    //        currentoperaindex -= 1;
+//     qDebug() << "undoModel operalist" << operalist.size();
+     for(unsigned int i = 0; i < operalist.size(); i++)
+     {
+//         qDebug() << i << operalist[i]->rotation;
+     }
+     if (redooperalist.size() == 0) {
+         for(unsigned int i = 0; i < mparent->getModelInstance().size(); i++)
+         {
+             operaData *od = new operaData();
+             od->id = i;
+             od->scale =  mparent->getModelInstance()[i]->getScale();
+             od->position =  mparent->getModelInstance()[i]->getPosition();
+             od->rotation =  mparent->getModelInstance()[i]->getRotation();
+             redooperalist.push_back(od);
+         }
+         originlen = redooperalist.size();
+         qDebug() << "undoModel originlen" << originlen;
+     }
+    if (operalist.size() > 0 ) {
+        int index = operalist.size() - 1;
+        for(unsigned int i = 0; i < mparent->getModelInstance().size(); i++)
+        {
+            if (i == operalist[index]->id) {
+                mparent->getModelInstance()[i]->setScale(operalist[index]->scale);
+                mparent->getModelInstance()[i]->setRotation(operalist[index]->rotation);
+                mparent->getModelInstance()[i]->setPosition(operalist[index]->position);
+                mThread->initUpdateThread(mparent->getModelInstance()[i]);
+                mThread->start();
+            }
+        }
+        if (redooperalist.size() >= originlen && operalist.size() > 1)  {
+            redooperalist.push_back(operalist[operalist.size()-1]);
+            operalist.pop_back();
+        }
+    }
+//   if (redooperalist.size() >originlen) {
+//        if (operalist.size() > 0 ) {
+//            redooperalist.push_back(operalist[operalist.size()-1]);
+//            operalist.pop_back();
+//        }
+//        //            operalist.erase(operalist.end());
+//   }
+    //    }
+//    qDebug() << "redoModel redooperalist" << redooperalist.size();
+    for(unsigned int i = 0; i < redooperalist.size(); i++)
+    {
+//        qDebug() << i << redooperalist[i]->rotation;
     }
 }
 
@@ -2490,12 +3326,12 @@ void M3DViewer::getMinMaxP(QVector3D mtri[3], QVector3D &mminp, QVector3D &mmaxp
 void M3DViewer::updateMSize()
 {
     QString bd;
-    getData("mksdlp_xsize", bd, "256");
+    getData("mksdlp_xsize", bd, "121");
     if(buildsizex != bd.toFloat())
     {
         buildsizex = bd.toFloat();
     }
-    getData("mksdlp_ysize", bd, "144");
+    getData("mksdlp_ysize", bd, "68.0625");
     if(buildsizey != bd.toFloat())
     {
         buildsizey = bd.toFloat();
@@ -2509,6 +3345,7 @@ void M3DViewer::updateMSize()
 
 void M3DViewer::drawFloor()
 {
+    //画平台
     updateMSize();
     glPushMatrix();
     glColor3f(0.0f,0.0f,0.0f);
@@ -2570,7 +3407,6 @@ void M3DViewer::drawFloor()
                 glVertex3d( buildsizex, 0, 0);
             glEnd();
 
-
             //draw red cordinate hints
             glLineWidth(2);
             glColor3f(1.0f,0.0f,0.0f);
@@ -2588,6 +3424,7 @@ void M3DViewer::drawFloor()
                     glVertex3d( 0, 10, 0);
                     glVertex3d( 0, 0, 0);
             glEnd();
+            //绘画底部方格
             glLineWidth(1);
             glColor3f(0.0f,0.0f,0.0f);
             glBegin(GL_LINES);
@@ -2606,18 +3443,68 @@ void M3DViewer::drawFloor()
     }
     glDisable(GL_BLEND);
     glPopMatrix();
+//    glPushMatrix();
+//    byte cstr[]={"font test OpenGL"};
+//    glDrawString(cstr);
+//    glPopMatrix();
+}
+void M3DViewer::glDrawString(unsigned char *str)
+{
+    GLYPHMETRICSFLOAT pgmf[1];
+
+    HDC hDC=wglGetCurrentDC();
+    HFONT hFont;
+    LOGFONT lf ;
+    memset(&lf,0,sizeof(LPLOGFONT));
+    lf.lfHeight = 1 ;
+    lf.lfWidth = 0 ;
+    lf.lfEscapement = 0 ;
+    lf.lfOrientation = 0 ;
+    lf.lfWeight = FW_BOLD ;
+    lf.lfItalic = FALSE ;
+    lf.lfUnderline = FALSE ;
+    lf.lfStrikeOut = FALSE ;
+    lf.lfCharSet = GB2312_CHARSET ;
+    lf.lfOutPrecision = OUT_TT_PRECIS ;
+    lf.lfClipPrecision= CLIP_DEFAULT_PRECIS ;
+    lf.lfQuality = PROOF_QUALITY ;
+    lf.lfPitchAndFamily = VARIABLE_PITCH | TMPF_TRUETYPE | FF_MODERN ;
+//    lstrcpy (lf.lfFaceName, "宋体") ;
+    hFont = CreateFontIndirect(&lf);
+    //设置当前字体
+    SelectObject(wglGetCurrentDC(),hFont);
+
+
+    DWORD dwChar;
+    int ListNum;
+    for(size_t i=0;i<strlen((char *)str);i++)
+    {
+        if(IsDBCSLeadByte(str[i]))
+        {
+            dwChar=(DWORD)((str[i]<<8)|str[i+1]);
+            i++;
+        }
+        else
+            dwChar=str[i];
+        ListNum=glGenLists(1);
+        wglUseFontOutlines(hDC,dwChar,1,ListNum,0.0,0.1f,WGL_FONT_POLYGONS,pgmf);
+        glCallList(ListNum);
+        glDeleteLists(ListNum,1);
+    }
 }
 
 void M3DViewer::OnFileOpen()
 {
     togglepanel();
+//    pDrawTimer->stop();
     mparent->loadscene();
 }
 
 void M3DViewer::OnFileSave()
 {
     togglepanel();
-    mparent->savedlp();
+//    mparent->savedlp();
+    mparent->savedlpfile();
 }
 
 void M3DViewer::OnStlSave()
@@ -2629,7 +3516,6 @@ void M3DViewer::OnStlSave()
 void M3DViewer::updateModel(ModelData *md)
 {
     smd = md;
-    qDebug() << "model update finish";
 }
 
 void M3DViewer::updateProgress(int progress)
@@ -2642,10 +3528,24 @@ void M3DViewer::updateProgress(int progress)
         mpb->show();
     }
     mpb->setProgress(progress);
+
     if(progress == 100)
     {
-        updatingModel = false;
+//        qDebug() << "add progress----" << progress;
+//        updatingModel = false;
+//        if (!pDrawTimer->isActive()) {
+//             qDebug() << "pDrawTimer--restart--";
+//            pDrawTimer->start(16.66);
+//        }
+
         mpb->hide();
         initPanelData();
     }
+}
+void M3DViewer::loadfileerrors(){
+    this->showToast(loadfileerror,10);
+//    updatingModel = false;
+    mparent->setadding(false);
+    mpb->hide();
+    initPanelData();
 }

@@ -20,6 +20,7 @@ public:
 public slots:
     void mousePressEvent(QMouseEvent *event);
     void paintEvent(QPaintEvent *event);
+    void clickevent(bool isoff);
 signals:
     void OnClicked(bool isoff);
 private:

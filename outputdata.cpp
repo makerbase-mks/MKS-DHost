@@ -18,6 +18,7 @@ OutPutData::~OutPutData()
 
 void OutPutData::generaLoop(std::vector<segment> &segments, int id)
 {
+//    qDebug() << "segments==" << segments.size() << id;
     segment sp = segments[id];
     segment ep = segments[id];
     segment np = segments[id];
@@ -39,6 +40,7 @@ void OutPutData::generaLoop(std::vector<segment> &segments, int id)
         }
 //        sp = ep;
     }while(!foundlastp);
+//    qDebug() << "foundlastp==" << foundlastp;
     if(ep.frontid == -1)
     {
         return;
@@ -53,10 +55,12 @@ void OutPutData::generaLoop(std::vector<segment> &segments, int id)
     id = ep.frontid;
     np = segments[id];
     do{
+//        qDebug() << "np.p1.x()" << np.p1.x() << np.p1.y();
         newloop.mpath.lineTo(np.p1.x(), np.p1.y());
         segments[id].inloop = true;
         if(segments[id].frontid == -1 || segments[id].frontid > segments.size()-1)
-        {
+        {//到最后一点时，需要首尾相连
+//            qDebug() << "到最后一点时，需要首尾相连";
             newloop.mpath.lineTo(ep.p2.x(), ep.p2.y());
             newloop.mpath.lineTo(ep.p1.x(), ep.p1.y());
             segment sg;
@@ -68,7 +72,7 @@ void OutPutData::generaLoop(std::vector<segment> &segments, int id)
             normalx = sg.p2.x() - sg.p1.x();
             normaly = sg.p2.y() - sg.p1.y();
             sg.normal.setX(-normaly);
-            sg.normal.setY(normalx);
+            sg.normal.setY(normalx);//法向量，垂直向量
             sg.normal.normalize();
             np = ep;
             if(max_x.mm1.p2.x() < sg.p2.x() && segments[id].p1 != segments[id].p2)
@@ -96,21 +100,25 @@ void OutPutData::generaLoop(std::vector<segment> &segments, int id)
         }
         if(max_x.mm1.p2.x() < segments[id].p2.x() && segments[id].p1 != segments[id].p2)
         {
+//            qDebug() << "np.p1.x()====0";
             max_x.mm1 = segments[id];
             max_x.mm2 = segments[np.frontid];
         }
         if(max_y.mm1.p2.y() < segments[id].p2.y() && segments[id].p1 != segments[id].p2)
         {
+//            qDebug() << "np.p1.x()====1";
             max_y.mm1 = segments[id];
             max_y.mm2 = segments[np.frontid];
         }
         if(min_x.mm1.p2.x() > segments[id].p2.x() && segments[id].p1 != segments[id].p2)
         {
+//            qDebug() << "np.p1.x()====2";
             min_x.mm1 = segments[id];
             min_x.mm2 = segments[np.frontid];
         }
         if(min_y.mm1.p2.y() > segments[id].p2.y() && segments[id].p1 != segments[id].p2)
         {
+//            qDebug() << "np.p1.x()====3";
             min_y.mm1 = segments[id];
             min_y.mm2 = segments[np.frontid];
         }
@@ -118,6 +126,12 @@ void OutPutData::generaLoop(std::vector<segment> &segments, int id)
         np = segments[id];
         count++;
     }while(!np.inloop);
+//    qDebug() << "np.inloop==" << !np.inloop;
+//    qDebug() << "count==" << count;
+    if (!np.inloop) {
+        //不加会崩
+        count = 0;
+    }
     if(count < 3)
     {
         for(int i = 0; i < count; i++)
@@ -127,6 +141,7 @@ void OutPutData::generaLoop(std::vector<segment> &segments, int id)
         }
         return;
     }
+//    qDebug() << "np.p1==" << np.p1 << ep.p1;
     if(np.p1 != ep.p1)
     {
         newloop.mpath.lineTo(ep.p1.x(), ep.p1.y());
@@ -136,9 +151,9 @@ void OutPutData::generaLoop(std::vector<segment> &segments, int id)
     checkMaxMin(min_x, segments);
     checkMaxMin(min_y, segments);
     newloop.maxsize.setX(max_x.mm1.p2.x());
-    newloop.maxsize.setY(max_y.mm1.p2.y());
+    newloop.maxsize.setY(max_x.mm1.p2.y());
     newloop.minsize.setX(min_x.mm1.p2.x());
-    newloop.minsize.setY(min_y.mm1.p2.y());
+    newloop.minsize.setY(min_x.mm1.p2.y());
 //    if(max_x.mm1.backid != -1)
 //    {
 //        max_x.mm2 = segments[max_x.mm1.backid];
@@ -237,7 +252,6 @@ void OutPutData::getColor(MaxMinPoint max_x, MaxMinPoint max_y, MaxMinPoint min_
             vote++;
         }
     }
-
     if(max_x.mm1.normal.x() > 0 && max_x.mm2.normal.x() > 0)
     {
         vote++;
@@ -291,8 +305,7 @@ void OutPutData::getColor(MaxMinPoint max_x, MaxMinPoint max_y, MaxMinPoint min_
             vote++;
         }
     }
-
-    if(vote > 0){
+    if(vote >= 0){
         newloop.fillcolor = QColor(255, 255, 255);
 //        fcolor = QColor(255, 255, 255);
     }else{

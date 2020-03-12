@@ -62,7 +62,7 @@ void MCanvas::setImage(QImage image)
 
 void MCanvas::wheelEvent(QWheelEvent *event)
 {
-    scale += 0.01*(event->delta()/fabs(event->delta()));
+    scale += 0.1*(event->delta()/fabs(event->delta()));
 //    this->image = this->regionImg.scaled(img_width*scale, img_height*scale,
 //                                         Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
     this->update();

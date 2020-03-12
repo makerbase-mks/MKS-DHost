@@ -56,12 +56,14 @@ class ModelData : public QObject
     Q_OBJECT
 public:
     QString filename;
+    bool hasBase;
+    std::vector<triangle> baselist;
     ModelData(std::vector<triangle> trilist, QString filename);
     ModelData(QString filename);
     ~ModelData();
-    void load();
-    void dealBIN();
-    void dealASCII();
+    void load(bool &error);
+    void dealBIN(bool &error);
+    void dealASCII(bool &error);
     void FromModel();
     QVector3D getScale();
     void setScale(QVector3D scale);
@@ -77,6 +79,7 @@ public:
     void setPosition(QVector3D position);
     std::vector<unsigned int> normDispLists;
     std::vector<unsigned int> supportLists;
+    std::vector<unsigned int> basenormDispLists;
     std::vector<MSupport> supportlist;
     std::vector<triangle> getZTri(float zdistance);
     void getStri(float xangle, std::vector<triangle> &trilist, float supportlen, QVector3D &maxp, QVector3D &minp, MDialog *mpd);
@@ -87,9 +90,10 @@ public:
     std::vector<triangle> getOutputList();
     void PreGenerateLoop(float thickness);
     void getSegments(std::vector< std::vector<segment> > &segments, int id);
-    QVector3D mmax;
-    QVector3D mmin;
+    QVector3D mmax; //模型最高点
+    QVector3D mmin; // 模型最低点
     QVector3D origonSize;
+    QVector3D mbasesize;
     void updateOutput();
     void getTri(triangle* &result, int index, bool &succed);
     void getRotateTri(triangle* &result);
@@ -97,13 +101,21 @@ public:
     void outputmodel(std::vector<triangle> &modeloutputlist);
     bool supportlastcheck(float x, float y, float z);
     std::vector<triangle> getTrilist();
+    int getOutputListSize();
+    bool hasuplift; //记录模型自动支撑z轴被抬起
+    void correctTri();
+    std::vector<triangle> getTriByID(int id);
 public slots:
     bool getNextTri(triangle &tri, float zdistance, int &nextid);
     void initGetNexy();
     int getZTriCount(float zdistance);
     void rotatPoint(QVector3D &vec, double angledeg, QVector3D axis);
+    void getHead(QVector3D botpoint, QVector3D &fhead, QVector3D &shead, QVector3D &thead, QVector3D &fdist, QVector3D &sdist, QVector3D &tdist);
+    void generateBase();
+    void setHasBase(bool hasBase);
 signals:
     void updateProgress(int);
+    void loadfileerror();
 private:
     std::vector<triangle> modellist;
     std::vector<triangle> outputlist;
@@ -123,6 +135,7 @@ private:
     QVector2D pixscale;
     void CenterModel();
     bool FromModelList();
+    bool FromBaseList();
     bool FromSupportList();
     void generateloop();
     int GetGLError();

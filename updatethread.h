@@ -23,6 +23,7 @@ public:
 signals:
     void updateProgress(int);
     void addmodel();
+    void overloadmodel();
     void updatemodel(ModelData*);
 
 protected:
@@ -31,6 +32,7 @@ protected:
 public slots:
     void initUpdateThread(ModelData *md);
     void initLoadThread(ModelData *md);
+    void changeLoadThread(ModelData *md);
     void initReadThread(ModelLoader *mdl);
     void initImageThread(int value, MCanvas *mc);
 //    void initImageThread(layerresult result, MCanvas *mc);

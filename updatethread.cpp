@@ -5,6 +5,7 @@
 #define READ_THREAD 1
 #define INIT_THREAD 2
 #define IMAGE_THREAD 3
+#define CHANGE_THREAD 4
 
 updateThread::updateThread()
 {
@@ -23,6 +24,13 @@ void updateThread::initLoadThread(ModelData *md)
     threadtype = INIT_THREAD;
     this->md = md;
     connect(this->md, SIGNAL(updateProgress(int)), this, SLOT(ModelUpdate(int)));
+}
+
+void updateThread::changeLoadThread(ModelData *md)
+{
+    threadtype = CHANGE_THREAD;
+    this->md = md;
+//    connect(this->md, SIGNAL(updateProgress(int)), this, SLOT(ModelUpdate(int)));
 }
 
 void updateThread::initReadThread(ModelLoader *mdl)
@@ -48,15 +56,24 @@ void updateThread::initImageThread(int value, MCanvas *mc)
 
 void updateThread::run()
 {
+    bool error = false;
     switch (threadtype) {
     case UPDATE_THREAD:
         md->updateOutput();
 //        emit updatemodel(md);
         break;
     case INIT_THREAD:
-        md->load();
+        error = false;
+        md->load(error);
+        if (!error) {
+            emit updateProgress(100);
+            emit addmodel();
+        }
+        break;
+    case CHANGE_THREAD:
+        md->load(error);
         emit updateProgress(100);
-        emit addmodel();
+        emit overloadmodel();
         break;
     case READ_THREAD:
         mdl->getTriList();

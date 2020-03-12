@@ -12,11 +12,14 @@ ModelData::ModelData(std::vector<triangle> trilist, QString filename) : QObject(
     scale = QVector3D(1, 1, 1);
     offset = QVector3D(0, 0, 0);
     thickness = 0.1016;
-    CenterModel();
-    FromModelList();
-    FromSupportList();
+//    CenterModel();
+//    FromModelList();
+//    FromSupportList();
     slicethreads.clear();
     slicethreads.push_back(QFuture<void>());
+    hasBase = false;
+    hasuplift = false;
+    FromModel();
 }
 
 ModelData::ModelData(QString filename) : QObject(0)
@@ -32,20 +35,32 @@ ModelData::ModelData(QString filename) : QObject(0)
 ModelData::~ModelData()
 {
     this->modellist.clear();
+    this->outputlist.clear();
+    this->resultlist.clear();
+    this->modellist.shrink_to_fit();
+    this->outputlist.shrink_to_fit();
+    this->resultlist.shrink_to_fit();
 }
 
 void ModelData::FromModel()
 {
-    FromModelList();
-    FromSupportList();
+    hasBase = false;
+    hasuplift = false;
+    FromModelList(); //模型
+    FromSupportList(); //选择支撑
+    generateBase(); //底座
+    updateOutput();
     slicethreads.clear();
     slicethreads.push_back(QFuture<void>());
 }
 
-void ModelData::load()
+void ModelData::load(bool &error)
 {
     QString filetype = "";
     modellist.clear();
+    outputlist.clear();
+    this->modellist.shrink_to_fit();
+    this->outputlist.shrink_to_fit();
     QFileInfo info(filename);
     QString suffix = info.suffix();
     QFile parsefile(filename);
@@ -76,18 +91,22 @@ void ModelData::load()
             filetype = "BIN";
         }
     }
+    qDebug() << "filetype===" << filetype;
     if(filetype == "ASCII")
     {
-        dealASCII();
+        dealASCII(error);
     }
     else if(filetype == "BIN")
     {
-        dealBIN();
+        dealBIN(error);
     }
-    CenterModel();
+    if (!error) {
+        CenterModel();
+    }
+
 }
 
-void ModelData::dealASCII()
+void ModelData::dealASCII(bool &error)
 {
     QFile modelfile;
     QTextStream ascii_text;
@@ -113,8 +132,14 @@ void ModelData::dealASCII()
     }
     int totalsize = modelfile.size();
     i = 0;
+    try {
+
+
     while(true)
     {
+        if (error) {
+            break;
+        }
         ascii_text >> buff;//eat facet
         if(buff == "endsolid" || ascii_text.atEnd())
         {
@@ -178,33 +203,50 @@ void ModelData::dealASCII()
         modellist.push_back(tri);
         i++;
     }
+    } catch (const std::bad_alloc& e) {
+        qDebug() << "catch (const std::bad_alloc&e===" << e.what();
+        error = true;
+        emit loadfileerror();
+    }
     modelfile.close();
 }
 
-void ModelData::dealBIN()
+void ModelData::dealBIN(bool &error)
 {
     int facecount;
     QFile modelfile;
     modelfile.setFileName(this->filename);
-    modelfile.open(QIODevice::ReadOnly);
+    bool isopen = modelfile.open(QIODevice::ReadOnly);
     modelfile.seek(80);
     modelfile.read((char*) &facecount, 4);
+    qDebug() << "facecount===" << facecount;
     triangle tri;
     float x, y, z;
     QVector3D vertex[3];
-    QVector3D normal;
+    QVector3D normal, tempnormal;
+    if (isopen) {
+        qDebug() << "isopen===" << isopen;
+    }
+    try {
+
+
     for(int i = 0; i < facecount; i++)
     {
+        if (error) {
+            break;
+        }
+//        qDebug() << "facecount=i==" << i;
         if(i%1000==0)
         {
+//            qDebug() << "i%1000==0===" << i << vertex[1] << vertex[2] << vertex[3];
             emit updateProgress(i*100/facecount);
         }
         modelfile.read((char *) &x, 4);
         modelfile.read((char *) &y, 4);
         modelfile.read((char *) &z, 4);
-        normal.setX(x);
-        normal.setY(y);
-        normal.setZ(z);
+        tempnormal.setX(x);
+        tempnormal.setY(y);
+        tempnormal.setZ(z);
 
         modelfile.read((char *) &x, 4);
         modelfile.read((char *) &y, 4);
@@ -226,11 +268,16 @@ void ModelData::dealBIN()
         vertex[2].setX(x);
         vertex[2].setY(y);
         vertex[2].setZ(z);
+
         normal = QVector3D::crossProduct(vertex[1]-vertex[0], vertex[2]-vertex[0]);
         float lens = sqrt(pow(normal.x(), 2)+pow(normal.y(), 2)+pow(normal.z(), 2));
-        normal.setX(normal.x()/lens);
-        normal.setY(normal.y()/lens);
-        normal.setZ(normal.z()/lens);
+        if(lens != 0)
+        {
+            normal.setX(normal.x()/lens);
+            normal.setY(normal.y()/lens);
+            normal.setZ(normal.z()/lens);
+        }
+        QApplication::processEvents();
         normal.normalize();
         tri.normal = normal;
         tri.vertex[0] = vertex[0];
@@ -238,12 +285,21 @@ void ModelData::dealBIN()
         tri.vertex[2] = vertex[2];
         modellist.push_back(tri);
         modelfile.read(2);
+
     }
+    } catch (const std::bad_alloc& e) {
+        qDebug() << "catch (const std::bad_alloc&e===" << e.what();
+        error = true;
+        emit loadfileerror();
+    }
+
     modelfile.close();
+    qDebug() << "modellist.size()" << modellist.size();
 }
 
 void ModelData::CenterModel()
 {
+//    处理模型在view的中心点位置与模型中心一致，方便旋转操作
     float max_x = -9999999, max_y = -999999, min_x = 999999, min_y = 999999, max_z = -999999, min_z = 999999;
     for(int i = 0; i < modellist.size(); i++)
     {
@@ -294,6 +350,7 @@ void ModelData::CenterModel()
             modellist[i].vertex[j] -= offset;
         }
     }
+    outputlist.reserve(modellist.size()+52); //52为默认模型底座数据
     outputlist = modellist;
     updateOutput();
     moffset = offset;
@@ -303,6 +360,11 @@ void ModelData::updateOutput()
     float max_x = -9999999, max_y = -999999, min_x = 999999, min_y = 999999, max_z = -999999, min_z = 999999;
     QVector3D nrot = rotation;
     nrot.setZ(nrot.z()+180);
+    int tarsize = modellist.size()-baselist.size();
+    if(outputlist.size() < modellist.size())
+    {
+        outputlist.reserve(modellist.size());
+    }
     for(int i = 0; i < modellist.size(); i++)
     {
         if(i%10==0)
@@ -310,14 +372,22 @@ void ModelData::updateOutput()
             emit updateProgress(i*50/modellist.size());
         }
         triangle tri = modellist[i];
-        rotatPoint(tri.normal, nrot.y(), QVector3D(0,1,0));
-        rotatPoint(tri.normal, nrot.x(), QVector3D(1,0,0));
-        rotatPoint(tri.normal, nrot.z(), QVector3D(0,0,1));
+        if(i < tarsize)
+        {
+            rotatPoint(tri.normal, nrot.y(), QVector3D(0,1,0));
+            rotatPoint(tri.normal, nrot.x(), QVector3D(1,0,0));
+            rotatPoint(tri.normal, nrot.z(), QVector3D(0,0,1));
+        }
         for(int v=0;v<3;v++)
         {
-            rotatPoint(tri.vertex[v], nrot.y(), QVector3D(0,1,0));
-            rotatPoint(tri.vertex[v], nrot.x(), QVector3D(1,0,0));
-            rotatPoint(tri.vertex[v], nrot.z(), QVector3D(0,0,1));
+            if(i < tarsize)
+            {
+                rotatPoint(tri.vertex[v], nrot.y(), QVector3D(0,1,0));
+                rotatPoint(tri.vertex[v], nrot.x(), QVector3D(1,0,0));
+                rotatPoint(tri.vertex[v], nrot.z(), QVector3D(0,0,1));
+            }else{
+                continue;
+            }
             if(tri.vertex[v].x() > max_x)
             {
                 max_x = tri.vertex[v].x();
@@ -362,6 +432,10 @@ void ModelData::updateOutput()
         for(int v=0;v<3;v++)
         {
             tri.vertex[v] *= scale;
+            if(i >= tarsize)
+            {
+                continue;
+            }
             if(tri.vertex[v].x() > max_x)
             {
                 max_x = tri.vertex[v].x();
@@ -389,21 +463,130 @@ void ModelData::updateOutput()
         }
         outputlist[i] = tri;
     }
-    offset.setX((max_x - min_x)*0.5);
-    offset.setY((max_y - min_y)*0.5);
-    offset.setZ(-min_z);
+    offset.setX((max_x + min_x)*0.5);
+    offset.setY((max_y + min_y)*0.5);
+    offset.setZ((max_z + min_z)*0.5);
     mmax.setX(max_x);
     mmax.setY(max_y);
     mmax.setZ(max_z);
     mmin.setX(min_x);
     mmin.setY(min_y);
     mmin.setZ(min_z);
+    QVector3D targetsize = (mmax-mmin);
+    float maxtar = targetsize.x();
+    if(targetsize.y() > maxtar)
+    {
+        maxtar = targetsize.y();
+    }
+    maxtar += maxtar*0.3;
+    targetsize.setX(maxtar/mbasesize.x());
+    targetsize.setY(maxtar/mbasesize.y());
+    targetsize.setZ(1/mbasesize.z());
+    for(int i = 0; i < outputlist.size(); i++)
+    {
+        for(int j = 0; j < 3; j++)
+        {
+            outputlist[i].vertex[j] -= offset;
+            if(i>= tarsize)
+            {
+                outputlist[i].vertex[j] = baselist[i-tarsize].vertex[j]*targetsize;
+                outputlist[i].vertex[j].setZ(baselist[i-tarsize].vertex[j].z()+min_z-0.5);
+            }
+        }
+    }
+    offset.setZ(-min_z);
 //    FromModelList();
     for(int i = 0; i < supportlist.size(); i++)
     {
         supportlist[i].updatelist(scale, offset, nrot);
     }
+
     emit updateProgress(100);
+}
+
+void ModelData::setHasBase(bool hasBase)
+{
+    this->hasBase = hasBase;
+    if (hasBase) {
+        this->position.setZ(this->position.z() + this->scale.z());
+    }else {
+        this->position.setZ(this->position.z() - this->scale.z());
+    }
+    if (this->position.z() < 0) {
+        this->position.setZ(0);
+    }
+    if (hasuplift) {
+        while(supportlist.size()>0)
+        {
+            supportlist.erase(supportlist.begin());
+        }
+    }
+}
+
+void ModelData::generateBase()
+{
+    qDebug() << "generateBase";
+    MSupport msup;
+    msup.getCylinder(baselist, mbasesize);
+    QVector3D targetsize = (mmax-mmin);
+    float maxtar = targetsize.x();
+    if(targetsize.y() > maxtar)
+    {
+        maxtar = targetsize.y();
+    }
+    maxtar += maxtar*0.3;
+    targetsize.setX(maxtar/mbasesize.x());
+    targetsize.setY(maxtar/mbasesize.y());
+    targetsize.setZ(1/mbasesize.z());
+    triangle tri;
+    for(int i=0; i<baselist.size(); i++)
+    {
+        tri = baselist[i];
+        for(int v=0; v<3; v++)
+        {
+            tri.vertex[v] *= targetsize;
+            tri.vertex[v].setZ(tri.vertex[v].z()-offset.z()-0.5);
+        }
+        modellist.push_back(tri);
+        outputlist.push_back(tri);
+    }
+//    outputlist = modellist;
+    unsigned int l;
+    unsigned int t;
+    const unsigned int listSize = 10000;//each list to be 10000 triangles big.
+    unsigned int tSeamCount = 0;
+    for( l = 0; l < basenormDispLists.size(); l++)
+    {
+        glDeleteLists(basenormDispLists[l],1);
+    }
+    basenormDispLists.push_back(glGenLists(1));
+    if(basenormDispLists.at(basenormDispLists.size()-1) == 0)
+        return;//failure to allocate a list index???
+    glNewList(basenormDispLists.at(basenormDispLists.size()-1),GL_COMPILE);
+    glBegin(GL_TRIANGLES);// Drawing Using Triangles
+    for(int i = 0; i < baselist.size(); i++)
+    {
+        glNormal3f(baselist[i].normal.x(), baselist[i].normal.y(), baselist[i].normal.z());
+        glVertex3f(baselist[i].vertex[0].x(),baselist[i].vertex[0].y(),baselist[i].vertex[0].z());
+        glVertex3f(baselist[i].vertex[1].x(),baselist[i].vertex[1].y(),baselist[i].vertex[1].z());
+        glVertex3f(baselist[i].vertex[2].x(),baselist[i].vertex[2].y(),baselist[i].vertex[2].z());
+        if(tSeamCount >= listSize)
+        {
+            glEnd();
+            glEndList();
+            basenormDispLists.push_back(glGenLists(1));
+            if(basenormDispLists.at(basenormDispLists.size()-1) == 0)
+            {
+                return;
+            }
+            glNewList(basenormDispLists.at(basenormDispLists.size()-1),GL_COMPILE);
+            glBegin(GL_TRIANGLES);// Drawing Using Triangles
+            tSeamCount = 0;
+        }
+        tSeamCount++;
+    }
+    glEnd();
+    glEndList();
 }
 
 void ModelData::rotatPoint(QVector3D &vec, double angledeg, QVector3D axis)
@@ -545,9 +728,13 @@ bool ModelData::FromSupportList()
     glEndList();
 }
 
-bool ModelData::supportlastcheck(float x, float y, float z)
+void ModelData::getHead(QVector3D botpoint, QVector3D &fhead, QVector3D &shead, QVector3D &thead, QVector3D &fdist, QVector3D &sdist, QVector3D &tdist)
 {
-    float tempz;
+    fdist = QVector3D(-1, 1.5, 0);
+    sdist = QVector3D(-1, -2, 0);
+    tdist = QVector3D(1.5, 0, 0);
+    float max_x, max_y, min_x, min_y;
+    std::vector<triangle> templist;
     for(int i = 0; i<modellist.size(); i++)
     {
         triangle tri = modellist[i];
@@ -560,10 +747,61 @@ bool ModelData::supportlastcheck(float x, float y, float z)
         }
         for(int v=0; v<3; v++)
         {
+            tri.vertex[v] *= scale;
             rotatPoint(tri.vertex[v], rotation.y(), QVector3D(0,1,0));
             rotatPoint(tri.vertex[v], rotation.x(), QVector3D(1,0,0));
             rotatPoint(tri.vertex[v], rotation.z(), QVector3D(0,0,1));
-            tri.vertex[v].setZ(tri.vertex[v].z() + offset.z()/scale.z()+position.z());
+            tri.vertex[v].setZ(tri.vertex[v].z() + offset.z()+position.z());
+        }
+        if(tri.vertex[0].z()>botpoint.z()&&tri.vertex[1].z()>botpoint.z()&&tri.vertex[2].z()>botpoint.z())
+        {
+            continue;
+        }
+        if(tri.vertex[0].x()>max_x&&tri.vertex[1].x()>max_x&&tri.vertex[2].x()>max_x)
+        {
+            continue;
+        }
+        if(tri.vertex[0].x()<min_x&&tri.vertex[1].x()<min_x&&tri.vertex[2].x()<min_x)
+        {
+            continue;
+        }
+        if(tri.vertex[0].y()>max_y&&tri.vertex[1].y()>max_y&&tri.vertex[2].y()>max_y)
+        {
+            continue;
+        }
+        if(tri.vertex[0].y()<min_y&&tri.vertex[1].y()<min_y&&tri.vertex[2].y()<min_y)
+        {
+            continue;
+        }
+        templist.push_back(tri);
+    }
+
+    while(templist.size()>0)
+    {
+        templist.erase(templist.begin());
+    }
+}
+
+bool ModelData::supportlastcheck(float x, float y, float z)
+{
+    float tempz;
+    for(int i = 0; i<modellist.size()-baselist.size(); i++)
+    {
+        triangle tri = modellist[i];
+        rotatPoint(tri.normal, rotation.y(), QVector3D(0,1,0));
+        rotatPoint(tri.normal, rotation.x(), QVector3D(1,0,0));
+        rotatPoint(tri.normal, rotation.z(), QVector3D(0,0,1));
+        if(tri.normal.z() > 0)
+        {
+            continue;
+        }
+        for(int v=0; v<3; v++)
+        {
+            tri.vertex[v] *= scale;
+            rotatPoint(tri.vertex[v], rotation.y(), QVector3D(0,1,0));
+            rotatPoint(tri.vertex[v], rotation.x(), QVector3D(1,0,0));
+            rotatPoint(tri.vertex[v], rotation.z(), QVector3D(0,0,1));
+            tri.vertex[v].setZ(tri.vertex[v].z() + offset.z()+position.z());
         }
         if(tri.vertex[0].x()>x&&tri.vertex[1].x()>x&&tri.vertex[2].x()>x)
         {
@@ -600,7 +838,8 @@ void ModelData::getStri(float xangle, std::vector<triangle> &trilist, float supp
     double dlen,dscale;
     int progress = 0;
     int total = modellist.size();
-    for(int i = 0; i<modellist.size(); i++)
+    QVector3D tempsize = mmax-mmin;
+    for(int i = 0; i<modellist.size()-baselist.size(); i++)
     {
         if(progress != (i*10/total))
         {
@@ -631,7 +870,12 @@ void ModelData::getStri(float xangle, std::vector<triangle> &trilist, float supp
             rotatPoint(tri.vertex[v], rotation.y(), QVector3D(0,1,0));
             rotatPoint(tri.vertex[v], rotation.x(), QVector3D(1,0,0));
             rotatPoint(tri.vertex[v], rotation.z(), QVector3D(0,0,1));
-            tri.vertex[v].setZ(tri.vertex[v].z() + offset.z()+position.z());
+            tri.vertex[v] *= scale;
+            tri.vertex[v].setZ(tri.vertex[v].z() + offset.z() +position.z());
+            if(hasBase)
+            {
+                tri.vertex[v].setZ(tri.vertex[v].z()+scale.z());
+            }
             tri.vertex[v] += tri.normal*dscale;
         }
         if(tri.vertex[0].z() <= 0 || tri.vertex[1].z() <= 0 || tri.vertex[2].z() <= 0)
@@ -764,16 +1008,38 @@ void ModelData::initGetNexy()
 
 bool ModelData::getNextTri(triangle &tri, float zdistance, int &nextid)
 {
-    if(zdistance > fabs(mmax.z() - mmin.z()))
+    float mtarsize = 0;
+    int upcount = 0;
+    int downcount = 0;
+    if(hasBase)
     {
-        zdistance = mmax.z() - mmin.z();
+        mtarsize = scale.z();
     }
-    while(nextid < outputlist.size())
+    if(zdistance > fabs(mmax.z() - mmin.z()+mtarsize+position.z()))
+    {
+        zdistance = mmax.z() - mmin.z()+mtarsize+position.z();
+    }
+    float rz = offset.z()+position.z();
+    int tarsize = baselist.size();
+    int basesize = outputlist.size()-baselist.size();
+    if(hasBase)
+    {
+        rz += scale.z();
+        tarsize = 0;
+    }
+    while(nextid < outputlist.size()-tarsize)
     {
         tri = outputlist[nextid];
-        tri.vertex[0].setZ(tri.vertex[0].z() + offset.z()+position.z());
-        tri.vertex[1].setZ(tri.vertex[1].z() + offset.z()+position.z());
-        tri.vertex[2].setZ(tri.vertex[2].z() + offset.z()+position.z());
+        if(nextid >= basesize)
+        {
+            tri.vertex[0].setZ(tri.vertex[0].z() + scale.z()+offset.z());
+            tri.vertex[1].setZ(tri.vertex[1].z() + scale.z()+offset.z());
+            tri.vertex[2].setZ(tri.vertex[2].z() + scale.z()+offset.z());
+        }else{
+            tri.vertex[0].setZ(tri.vertex[0].z() + rz);
+            tri.vertex[1].setZ(tri.vertex[1].z() + rz);
+            tri.vertex[2].setZ(tri.vertex[2].z() + rz);
+        }
         if(tri.vertex[0].z() > zdistance && tri.vertex[1].z() > zdistance && tri.vertex[2].z() > zdistance)
         {
             nextid++;
@@ -788,6 +1054,15 @@ bool ModelData::getNextTri(triangle &tri, float zdistance, int &nextid)
         return true;
     }
     return false;
+}
+
+void ModelData::correctTri(){
+
+}
+
+std::vector<triangle> ModelData::getTriByID(int id){
+    std::vector<triangle> result;
+    return result;
 }
 
 int ModelData::getZTriCount(float zdistance)
@@ -1159,13 +1434,16 @@ int ModelData::GetGLError()
 }
 
 void ModelData::setOffset(QVector3D scale)
-{
+{   
     this->scale = scale;
 //    updateOutput();
 }
 void ModelData::setPosition(QVector3D position)
 {
     this->position = position;
+    if (this->position.z() < 0) {
+        this->position.setZ(0);
+    }
 //    updateOutput();
 }
 void ModelData::setRotation(QVector3D rotation)
@@ -1185,6 +1463,16 @@ void ModelData::setScale(QVector3D scale)
 {
     if(this->scale != scale)
     {
+        if (hasBase) {
+            if (this->scale.z() > scale.z()) {
+                this->position.setZ(this->position.z() - (this->scale.z() - scale.z()));
+            }else {
+                this->position.setZ(this->position.z() + (scale.z() - this->scale.z()));
+            }
+            if (this->position.z() < 0) {
+                this->position.setZ(0);
+            }
+        }
         while(supportlist.size()>0)
         {
             supportlist.erase(supportlist.begin());
@@ -1246,7 +1534,7 @@ void ModelData::getTri(triangle* &result, int index, bool &succed)
     result->vertex[1] = modellist[index].vertex[1];
     result->vertex[2] = modellist[index].vertex[2];
     float mmz = mmin.z()-position.z();
-    if(result->vertex[0].z() == mmz || result->vertex[1].z() == mmz || result->vertex[2].z() == mmz)
+    if(result->vertex[0].z() == mmz || result->vertex[1].z() == mmz || result->vertex[2].z() == mmz)  //判断这个点是否贴着平台平面（底面），贴着的不加手动支撑（自动支撑会先抬高）
     {
         succed = false;
         return;
@@ -1266,6 +1554,7 @@ void ModelData::getRotateTri(triangle *&result)
         rotatPoint(result->vertex[i], nrot.y(), QVector3D(0, 1, 0));
         rotatPoint(result->vertex[i], nrot.x(), QVector3D(1, 0, 0));
         rotatPoint(result->vertex[i], nrot.z(), QVector3D(0, 0, 1));
+        result->vertex[i]*=scale;
     }
 }
 
@@ -1284,21 +1573,38 @@ std::vector<triangle> ModelData::getTrilist()
     return modellist;
 }
 
+int ModelData::getOutputListSize()
+{
+    return outputlist.size();
+}
+
 void ModelData::outputmodel(std::vector<triangle> &modeloutputlist)
 {
 //    char* detail = new char[2];
-    for(int i = 0; i < modellist.size(); i++)
+    int tarsize = modellist.size()-baselist.size();
+    if(hasBase)
+    {
+        tarsize = modellist.size();
+    }
+    int botsize = modellist.size()-baselist.size();
+    for(int i = 0; i < tarsize; i++)
     {
         triangle tri = modellist[i];
-        rotatPoint(tri.normal, rotation.y(), QVector3D(0,1,0));
-        rotatPoint(tri.normal, rotation.x(), QVector3D(1,0,0));
-        rotatPoint(tri.normal, rotation.z(), QVector3D(0,0,1));
+        if(i<botsize)
+        {
+            rotatPoint(tri.normal, rotation.y(), QVector3D(0,1,0));
+            rotatPoint(tri.normal, rotation.x(), QVector3D(1,0,0));
+            rotatPoint(tri.normal, rotation.z(), QVector3D(0,0,1));
+        }
         for(int v=0;v<3;v++)
         {
             tri.vertex[v] *= scale;
-            rotatPoint(tri.vertex[v], rotation.y(), QVector3D(0,1,0));
-            rotatPoint(tri.vertex[v], rotation.x(), QVector3D(1,0,0));
-            rotatPoint(tri.vertex[v], rotation.z(), QVector3D(0,0,1));
+            if(i<botsize)
+            {
+                rotatPoint(tri.vertex[v], rotation.y(), QVector3D(0,1,0));
+                rotatPoint(tri.vertex[v], rotation.x(), QVector3D(1,0,0));
+                rotatPoint(tri.vertex[v], rotation.z(), QVector3D(0,0,1));
+            }
         }
         modeloutputlist.push_back(tri);
     }

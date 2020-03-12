@@ -20,6 +20,12 @@
 #include <mbutton.h>
 #include <supportthread.h>
 #include <dlplog.h>
+struct operaData{
+    QVector3D rotation;
+    QVector3D scale;
+    QVector3D position;
+    int id;
+};
 
 struct triangle;
 class MainWindow;
@@ -42,7 +48,7 @@ public:
     bool controldown;
     bool CancelAdd;
     bool ViewChangeing;
-
+    void saveOperaData(int id, QVector3D  mscale, QVector3D mrotation, QVector3D mpos);
 public slots:
     void UpdateTick();
     void mousePressEvent(QMouseEvent *event);
@@ -82,6 +88,11 @@ public slots:
     void getPlatformPos(QPoint mousePos);
     void autoSupportFinish();
     void autoaddSupport(QVector3D mpos, int id);
+    void updateSupport(float x, float y);
+    void undoModel();
+    void redoModel();
+    void delAllSupport();
+    void loadfileerrors();
 signals:
     void OnModelSelected(int id);
     void OnTriSelected(int id);
@@ -89,9 +100,9 @@ protected:
     void initializeGL();
     void paintGL();
     void resizeGL(int width, int height);
-    void resetCamera(bool xraygon);
-    void drawFloor();
-    void drawGUI();
+    void resetCamera(bool xraygon); //改变视角
+    void drawFloor(); // 画平台
+    void drawGUI();  //画左边绿色的背景
     void drawModelInstance();
     void drawSupport();
     void update3DPos(float x, float y);
@@ -115,9 +126,9 @@ private:
     MProgressBar *mpb;
     bool supportmod;
     bool autosize;
-    int triid;
+    int triid; //  三角面 id
     triangle* tri;
-    int bottriid;
+    int bottriid; //  相对底部的三角面ID
     triangle* bottri;
     double waylen;
     double dscale;
@@ -145,11 +156,14 @@ private:
     QString currtool;
     QString supporttype;
     QString supportshape;
+    QString midsupportshape; //支撑中部形状
     QVector3D supportpoint;
-    QVector3D botpoint;
-    QVector3D bottsize,middsize;
+    QVector3D botpoint, fhead, shead, thead, turnpoint, fdist, sdist, tdist;
+    QVector3D bottsize,middsize,topsize;
     bool pandown;
     bool dragdown;
+    bool haveturn;
+    QString picksupportpart;
 
     //visual build size only - use project settings as actual size
     float buildsizex;
@@ -174,9 +188,11 @@ private:
     void getFreePoint(QVector3D &mfreepoint);
     void rePaintModel();
     void rePaintSupport(int x, int y);
+    void getSupportPart(int x, int y);
     void appendSupport(bool needrotate = true);
     void deleteSupport();
     void autoSupport();
+    void getUnderPoint(QVector3D mpoint, QVector3D &underpoint);
     void getBottomPoint();
     void getTriCenter();
     QVector3D getPointTri(triangle* bottri);
@@ -198,13 +214,19 @@ private:
     QVector3D mscale, mposition, mrotation;
     bool animfinish;
     QVector3D screenpos, mdmaxpos, mdminpos;
-    QString string_selectmodel;
+    QString string_selectmodel, string_finishopera, str_wait, loadfileerror;
     updateThread *mThread;
     supportThread *supThread;
     mButton *delbutton, *copybutton;
     QVector3D mousePlatformPos;
     void initIconLabel(IconLabel *&widget, QString url, QString text, int lpos);
     void initPanelData();
+    std::vector<operaData *> operalist,redooperalist;
+    bool saveopera;
+    int currentoperaindex;
+    int originlen;
+//    bool hasuplift;
+    void glDrawString(unsigned char *str);
 };
 
 #endif // 3DVIEWER_H

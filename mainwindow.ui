@@ -31,7 +31,21 @@
      <number>0</number>
     </property>
     <item>
-     <layout class="QHBoxLayout" name="ViewWindow"/>
+     <layout class="QHBoxLayout" name="ViewWindow">
+      <item>
+       <widget class="QLabel" name="label">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+          <horstretch>10</horstretch>
+          <verstretch>10</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="text">
+         <string>格式转换</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
     </item>
    </layout>
   </widget>
@@ -41,7 +55,7 @@
      <x>0</x>
      <y>0</y>
      <width>1151</width>
-     <height>21</height>
+     <height>23</height>
     </rect>
    </property>
    <widget class="QMenu" name="menu_File">
@@ -52,7 +66,21 @@
     <addaction name="actionSave"/>
     <addaction name="actionExit"/>
    </widget>
+   <widget class="QMenu" name="menuHelp">
+    <property name="title">
+     <string>Help</string>
+    </property>
+    <addaction name="actionTips"/>
+   </widget>
+   <widget class="QMenu" name="menuAbout">
+    <property name="title">
+     <string>About</string>
+    </property>
+    <addaction name="actionAbout_software"/>
+   </widget>
    <addaction name="menu_File"/>
+   <addaction name="menuHelp"/>
+   <addaction name="menuAbout"/>
   </widget>
   <widget class="QToolBar" name="mainToolBar">
    <attribute name="toolBarArea">
@@ -77,6 +105,16 @@
   <action name="actionExit">
    <property name="text">
     <string>Exit</string>
+   </property>
+  </action>
+  <action name="actionTips">
+   <property name="text">
+    <string>Usage guidelines</string>
+   </property>
+  </action>
+  <action name="actionAbout_software">
+   <property name="text">
+    <string>MKS DHOST V2.0.5</string>
    </property>
   </action>
  </widget>

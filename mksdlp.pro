@@ -3,22 +3,23 @@
 # Project created by QtCreator 2018-06-29T09:11:15
 #
 #-------------------------------------------------
-
+#添加第三方库
 QT       += core gui
 QT       += svg
 QT       += opengl
 QT       += network
 
-
+#LIBS += -lDbgHelp
 
 TARGET = MKSDHOST
 TEMPLATE = app
-
+#多语言
 TRANSLATIONS+=cn.ts\
             en.ts
 
 
 SOURCES += main.cpp\
+    changeview.cpp \
         mainwindow.cpp \
     m3dviewer.cpp \
     modelloader.cpp \
@@ -45,6 +46,7 @@ SOURCES += main.cpp\
     dlplog.cpp
 
 HEADERS  += mainwindow.h \
+    changeview.h \
     m3dviewer.h \
     modelloader.h \
     modeldata.h \
@@ -85,3 +87,5 @@ INCLUDEPATH += $$PWD/../quazip-master/quazip
 DEPENDPATH += $$PWD/../quazip-master/quazip
 
 win32-g++: PRE_TARGETDEPS += $$PWD/../quazip-master/quazip/release/libquazip.a
+
+#QMAKE_LFLAGS_RELEASE = /INCREMENTAL:NO /DEBUG

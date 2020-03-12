@@ -27,5 +27,20 @@
         <file>icon/copy_press.png</file>
         <file>icon/del.png</file>
         <file>icon/del_press.png</file>
+        <file>icon/1.1.png</file>
+        <file>icon/1.png</file>
+        <file>icon/2.1.png</file>
+        <file>icon/2.png</file>
+        <file>icon/3.1.png</file>
+        <file>icon/3.png</file>
+        <file>icon/4.1.png</file>
+        <file>icon/4.png</file>
+        <file>icon/5.png</file>
+        <file>icon/6.1.png</file>
+        <file>icon/6.png</file>
+        <file>icon/redo.png</file>
+        <file>icon/redo_press.png</file>
+        <file>icon/undo.png</file>
+        <file>icon/undo_press.png</file>
     </qresource>
 </RCC>
